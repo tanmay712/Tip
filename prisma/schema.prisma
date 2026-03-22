@@ -1,0 +1,75 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String        @id @default(cuid())
+  discordId    String        @unique
+  network      String        @default("mainnet")
+  createdAt    DateTime      @default(now())
+  wallets      Wallet[]
+  sentTxns     Transaction[] @relation("sender")
+  receivedTxns Transaction[] @relation("receiver")
+}
+
+model Wallet {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  chain        String
+  address      String
+  encryptedKey String
+  isTestnet    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  @@unique([userId, chain, isTestnet])
+}
+
+model Transaction {
+  id          String   @id @default(cuid())
+  type        String
+  senderId    String?
+  sender      User?    @relation("sender", fields: [senderId], references: [id])
+  receiverId  String?
+  receiver    User?    @relation("receiver", fields: [receiverId], references: [id])
+  chain       String
+  token       String
+  tokenSymbol String
+  amount      String
+  txHash      String?
+  status      String   @default("completed")
+  isTestnet   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
+
+model Airdrop {
+  id          String         @id @default(cuid())
+  creatorId   String
+  guildId     String
+  channelId   String
+  messageId   String?
+  chain       String
+  token       String
+  tokenSymbol String
+  totalAmount String
+  perClaim    String
+  maxClaims   Int
+  claims      AirdropClaim[]
+  expiresAt   DateTime
+  createdAt   DateTime       @default(now())
+}
+
+model AirdropClaim {
+  id        String   @id @default(cuid())
+  airdropId String
+  airdrop   Airdrop  @relation(fields: [airdropId], references: [id])
+  userId    String
+  claimedAt DateTime @default(now())
+
+  @@unique([airdropId, userId])
+}

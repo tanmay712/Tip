@@ -1,0 +1,12 @@
+node_modules/
+dist/
+docs-api/
+*.db
+*.db-journal
+.env
+.env.local
+*.tsbuildinfo
+coverage/
+.DS_Store
+docs/node_modules/
+docs/dist/

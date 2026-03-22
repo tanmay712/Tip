@@ -1,0 +1,81 @@
+import * as walletRepo from "../database/repositories/wallet.repo.js";
+import * as txRepo from "../database/repositories/transaction.repo.js";
+import { getChain, CHAIN_IDS } from "../blockchain/chains.js";
+import * as alchemy from "../blockchain/alchemy.js";
+import { getSolBalance } from "../blockchain/solana.js";
+import { TXN_TYPES } from "../utils/constants.js";
+import { logger } from "../utils/logger.js";
+import type { AlchemyWebhookEvent } from "../blockchain/webhooks.js";
+
+export async function processWebhookDeposit(
+  event: AlchemyWebhookEvent,
+): Promise<{ credited: number }> {
+  let credited = 0;
+
+  for (const activity of event.event.activity) {
+    const toAddress = activity.toAddress?.toLowerCase();
+    if (!toAddress) continue;
+
+    const wallet = await walletRepo.findWalletByAddress(toAddress);
+    if (!wallet) continue;
+
+    // Check if we've already recorded this deposit
+    const existing = await txRepo.getUserTransactions(wallet.userId, {
+      isTestnet: wallet.isTestnet,
+      limit: 100,
+    });
+    const alreadyRecorded = existing.some(
+      (t) => t.txHash === activity.hash && t.type === TXN_TYPES.DEPOSIT,
+    );
+    if (alreadyRecorded) continue;
+
+    const tokenSymbol = activity.asset || getChain(wallet.chain).nativeToken;
+    const token =
+      activity.rawContract?.address?.toLowerCase() || "native";
+    const rawAmount = activity.rawContract
+      ? activity.rawContract.rawValue
+      : Math.floor(
+          activity.value * 10 ** getChain(wallet.chain).nativeDecimals,
+        ).toString();
+
+    await txRepo.createTransaction({
+      type: TXN_TYPES.DEPOSIT,
+      receiverId: wallet.userId,
+      chain: wallet.chain,
+      token,
+      tokenSymbol,
+      amount: rawAmount,
+      txHash: activity.hash,
+      isTestnet: wallet.isTestnet,
+      status: "completed",
+    });
+
+    credited++;
+    logger.info(
+      {
+        address: toAddress,
+        chain: wallet.chain,
+        amount: rawAmount,
+        txHash: activity.hash,
+      },
+      "Deposit credited",
+    );
+  }
+
+  return { credited };
+}
+
+export async function pollDeposits(isTestnet: boolean): Promise<void> {
+  for (const chainId of CHAIN_IDS) {
+    const chain = getChain(chainId);
+    if (chain.type === "solana") continue; // Solana polling is separate
+
+    try {
+      // This is a simplified polling approach
+      // In production, use Alchemy webhooks instead
+      logger.debug({ chain: chainId, isTestnet }, "Polling deposits");
+    } catch (err) {
+      logger.error({ err, chain: chainId }, "Deposit poll failed");
+    }
+  }
+}

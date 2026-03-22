@@ -1,0 +1,35 @@
+---
+title: Hodlr
+description: Modern Discord crypto tipping bot powered by Alchemy
+template: splash
+hero:
+  tagline: Tip crypto. Instantly. Across 8 blockchains.
+  actions:
+    - text: Get Started
+      link: /getting-started
+      icon: right-arrow
+    - text: View Commands
+      link: /commands
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## What is Hodlr?
+
+Hodlr is a modern Discord crypto tipping bot that lets you send, rain, and airdrop tokens across 8 blockchains — instantly, with no gas fees for internal transfers.
+
+<CardGrid stagger>
+  <Card title="Instant Tips" icon="rocket">
+    Send crypto to any Discord user with `/tip`. Off-chain transfers are free and instant.
+  </Card>
+  <Card title="8 Chains" icon="puzzle">
+    Ethereum, Polygon, Arbitrum, Optimism, Base, zkSync, Avalanche, and Solana.
+  </Card>
+  <Card title="Testnet Ready" icon="setting">
+    Toggle between mainnet and testnet with `/network`. Perfect for testing.
+  </Card>
+  <Card title="Secure" icon="approve-check">
+    AES-256-GCM encrypted wallets. No private keys ever leave the server.
+  </Card>
+</CardGrid>
