@@ -28,7 +28,7 @@ export const config = {
     url: optional("DATABASE_URL", "file:./hodlr.db"),
   },
   api: {
-    port: parseInt(optional("API_PORT", "3000"), 10),
+    port: parseInt(process.env.PORT || optional("API_PORT", "3000"), 10),
     host: optional("API_HOST", "0.0.0.0"),
   },
   defaultNetwork: optional("DEFAULT_NETWORK", "mainnet") as
