@@ -1,0 +1,14 @@
+node_modules/
+dist/
+docs/
+docs-api/
+.env
+.env.local
+*.db
+*.db-journal
+*.tsbuildinfo
+coverage/
+.DS_Store
+.git/
+README.md
+LICENSE

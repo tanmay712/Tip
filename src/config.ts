@@ -25,7 +25,7 @@ export const config = {
     secret: required("ENCRYPTION_SECRET"),
   },
   database: {
-    url: optional("DATABASE_URL", "file:./hodlr.db"),
+    url: optional("DATABASE_URL", "file:/app/data/hodlr.db"),
   },
   api: {
     port: parseInt(process.env.PORT || optional("API_PORT", "3000"), 10),

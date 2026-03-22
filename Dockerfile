@@ -1,22 +1,24 @@
 FROM node:20-alpine AS base
 WORKDIR /app
 
-# Install dependencies
-FROM base AS deps
-COPY package.json package-lock.json* ./
-COPY prisma ./prisma/
-RUN npm ci --omit=dev && npx prisma generate
-
-# Build
+# Build stage — install ALL deps, generate prisma client, compile TS
 FROM base AS build
-COPY package.json package-lock.json* ./
+COPY package.json package-lock.json ./
 COPY prisma ./prisma/
-RUN npm ci && npx prisma generate
+RUN npm ci
+RUN npx prisma generate
 COPY tsconfig.json ./
 COPY src ./src/
 RUN npm run build
 
-# Production
+# Production deps — clean node_modules without devDeps
+FROM base AS deps
+COPY package.json package-lock.json ./
+COPY prisma ./prisma/
+RUN npm ci --omit=dev
+RUN npx prisma generate
+
+# Final production image
 FROM base AS production
 ENV NODE_ENV=production
 
@@ -30,4 +32,4 @@ RUN mkdir -p /app/data
 
 EXPOSE 3000
 
-CMD ["node", "dist/index.js"]
+CMD ["sh", "-c", "npx prisma db push --skip-generate && node dist/index.js"]
