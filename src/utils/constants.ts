@@ -1,7 +1,7 @@
 export const BRAND = {
   name: "Hodlr",
   color: 0x00d4aa,
-  icon: "https://i.imgur.com/placeholder.png",
+  icon: "https://avatars.githubusercontent.com/u/97213385?v=4",
   tagline: "Tip crypto. Instantly.",
 } as const;
 

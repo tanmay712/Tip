@@ -6,6 +6,7 @@ import { truncateAddress, formatTokenAmount } from "../../utils/format.js";
 export function brandEmbed(): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(BRAND.color)
+    .setThumbnail(BRAND.icon)
     .setFooter({ text: `${BRAND.name} — ${BRAND.tagline}` })
     .setTimestamp();
 }
@@ -14,6 +15,7 @@ export function chainEmbed(chainId: string): EmbedBuilder {
   const chain = getChain(chainId);
   return new EmbedBuilder()
     .setColor(chain.color)
+    .setThumbnail(BRAND.icon)
     .setFooter({ text: `${chain.emoji} ${chain.name} — ${BRAND.name}` })
     .setTimestamp();
 }
