@@ -12,6 +12,8 @@ export interface CreateAirdropResult {
   success: boolean;
   error?: string;
   airdropId?: string;
+  /** Total amount reserved for this airdrop (perClaim * maxClaims, remainder truncated) */
+  totalAmount: string;
   perClaim: string;
   maxClaims: number;
 }
@@ -42,7 +44,10 @@ export async function createAirdrop(
 ): Promise<CreateAirdropResult> {
   const clampedClaims = Math.min(maxClaims, LIMITS.maxAirdropSlots);
   const totalBigInt = BigInt(totalAmount);
-  const perClaim = (totalBigInt / BigInt(clampedClaims)).toString();
+
+  const perClaimBigInt = totalBigInt / BigInt(clampedClaims);
+  const reservedAmountBigInt = perClaimBigInt * BigInt(clampedClaims);
+  const perClaim = perClaimBigInt.toString();
 
   const creator = await userRepo.findOrCreateUser(creatorDiscordId);
   const balance = await txRepo.getUserBalance(
@@ -52,10 +57,11 @@ export async function createAirdrop(
     isTestnet,
   );
 
-  if (balance < totalBigInt) {
+  if (balance < reservedAmountBigInt) {
     return {
       success: false,
       error: "Insufficient balance",
+      totalAmount: reservedAmountBigInt.toString(),
       perClaim,
       maxClaims: clampedClaims,
     };
@@ -68,7 +74,7 @@ export async function createAirdrop(
     chain: chainId,
     token,
     tokenSymbol,
-    amount: totalAmount,
+    amount: reservedAmountBigInt.toString(),
     isTestnet,
     status: "completed",
   });
@@ -84,20 +90,26 @@ export async function createAirdrop(
     chain: chainId,
     token,
     tokenSymbol,
-    totalAmount,
+    totalAmount: reservedAmountBigInt.toString(),
     perClaim,
     maxClaims: clampedClaims,
     expiresAt,
   });
 
   logger.info(
-    { creator: creatorDiscordId, airdropId: airdrop.id, totalAmount, claims: clampedClaims },
+    {
+      creator: creatorDiscordId,
+      airdropId: airdrop.id,
+      totalAmount: reservedAmountBigInt.toString(),
+      claims: clampedClaims,
+    },
     "Airdrop created",
   );
 
   return {
     success: true,
     airdropId: airdrop.id,
+    totalAmount: reservedAmountBigInt.toString(),
     perClaim,
     maxClaims: clampedClaims,
   };

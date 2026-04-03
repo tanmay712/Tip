@@ -4,7 +4,7 @@ import * as userRepo from "../database/repositories/user.repo.js";
 import * as walletRepo from "../database/repositories/wallet.repo.js";
 import * as txRepo from "../database/repositories/transaction.repo.js";
 import { getChain } from "../blockchain/chains.js";
-import { getEvmProvider, broadcastEvmTransaction } from "../blockchain/provider.js";
+import { getEvmProvider, waitForTransaction } from "../blockchain/provider.js";
 import { transferSol, transferSplToken } from "../blockchain/solana.js";
 import { getPrivateKey } from "./wallet.service.js";
 import { TXN_TYPES } from "../utils/constants.js";
@@ -112,6 +112,19 @@ export async function withdraw(
         const contract = new ethers.Contract(token, ERC20_ABI, signer);
         const tx = await contract.transfer(toAddress, amountBigInt);
         txHash = tx.hash;
+      }
+
+      // Ensure the transaction actually got mined successfully before
+      // recording the withdrawal as completed.
+      const receipt = await waitForTransaction(chainId, isTestnet, txHash, 1);
+      if (!receipt || receipt.status !== 1) {
+        return {
+          success: false,
+          error: "Transaction reverted",
+          chain: chainId,
+          amount,
+          tokenSymbol,
+        };
       }
     }
   } catch (err) {

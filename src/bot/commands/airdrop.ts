@@ -87,13 +87,15 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     return;
   }
 
+  const reservedTotalAmount = result.totalAmount;
+
   const expiresAt = new Date(Date.now() + LIMITS.airdropExpiryMinutes * 60 * 1000);
 
   const msg = await interaction.editReply({
     embeds: [
       airdropEmbed({
         creatorTag: interaction.user.displayName,
-        totalAmount: rawAmount,
+        totalAmount: reservedTotalAmount,
         perClaim: result.perClaim,
         decimals,
         tokenSymbol,
@@ -150,7 +152,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         embeds: [
           airdropEmbed({
             creatorTag: interaction.user.displayName,
-            totalAmount: rawAmount,
+            totalAmount: reservedTotalAmount,
             perClaim: result.perClaim,
             decimals,
             tokenSymbol,

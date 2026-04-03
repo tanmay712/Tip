@@ -92,7 +92,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     embeds: [
       rainEmbed({
         senderTag: interaction.user.displayName,
-        totalAmount: rawAmount,
+        totalAmount: result.totalAmount,
         perUser: result.perUser,
         decimals,
         tokenSymbol,

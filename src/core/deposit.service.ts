@@ -1,8 +1,6 @@
 import * as walletRepo from "../database/repositories/wallet.repo.js";
 import * as txRepo from "../database/repositories/transaction.repo.js";
 import { getChain, CHAIN_IDS } from "../blockchain/chains.js";
-import * as alchemy from "../blockchain/alchemy.js";
-import { getSolBalance } from "../blockchain/solana.js";
 import { TXN_TYPES } from "../utils/constants.js";
 import { logger } from "../utils/logger.js";
 import type { AlchemyWebhookEvent } from "../blockchain/webhooks.js";
@@ -20,15 +18,13 @@ export async function processWebhookDeposit(
     if (!wallet) continue;
 
     // Check if we've already recorded this deposit
-    const existing = await txRepo.getUserTransactions(wallet.userId, {
+    const existing = await txRepo.findTransactionByTxHash({
+      txHash: activity.hash,
+      type: TXN_TYPES.DEPOSIT,
+      chain: wallet.chain,
       isTestnet: wallet.isTestnet,
-      limit: 100,
     });
-    const alreadyRecorded = existing.some(
-      (t: { txHash: string | null; type: string }) =>
-        t.txHash === activity.hash && t.type === TXN_TYPES.DEPOSIT,
-    );
-    if (alreadyRecorded) continue;
+    if (existing) continue;
 
     const tokenSymbol = activity.asset || getChain(wallet.chain).nativeToken;
     const token =
@@ -80,8 +76,7 @@ export async function pollDeposits(isTestnet: boolean): Promise<void> {
     try {
       logger.debug({ chain: chainId, isTestnet }, "Polling deposits for chain");
       
-      // Get all wallets for this chain
-      const wallets = await walletRepo.getUserWallets("", isTestnet);
+      const wallets = await walletRepo.getWalletsByChain(chainId, isTestnet);
       
       for (const wallet of wallets) {
         if (wallet.chain !== chainId) continue;

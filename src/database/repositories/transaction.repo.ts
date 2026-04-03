@@ -15,6 +15,23 @@ export async function createTransaction(data: {
   return prisma.transaction.create({ data });
 }
 
+export async function findTransactionByTxHash(params: {
+  txHash: string;
+  type: string;
+  chain: string;
+  isTestnet: boolean;
+}) {
+  return prisma.transaction.findFirst({
+    where: {
+      txHash: params.txHash,
+      type: params.type,
+      chain: params.chain,
+      isTestnet: params.isTestnet,
+    },
+    select: { id: true },
+  });
+}
+
 export async function getUserTransactions(
   userId: string,
   opts: {

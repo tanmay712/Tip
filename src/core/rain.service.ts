@@ -59,19 +59,21 @@ export async function sendRain(
   );
   const totalBigInt = BigInt(totalAmount);
 
-  if (balance < totalBigInt) {
+  const perUserAmount = totalBigInt / BigInt(recipients.length);
+  const actualDebit = perUserAmount * BigInt(recipients.length);
+
+  if (balance < actualDebit) {
     return {
       success: false,
       error: `Insufficient balance`,
       perUser: "0",
       recipients: recipients.length,
-      totalAmount,
+      totalAmount: actualDebit.toString(),
       tokenSymbol,
       chain: chainId,
     };
   }
 
-  const perUserAmount = totalBigInt / BigInt(recipients.length);
   const perUser = perUserAmount.toString();
 
   for (const recipientId of recipients) {
@@ -100,7 +102,7 @@ export async function sendRain(
     success: true,
     perUser,
     recipients: recipients.length,
-    totalAmount,
+    totalAmount: actualDebit.toString(),
     tokenSymbol,
     chain: chainId,
   };
