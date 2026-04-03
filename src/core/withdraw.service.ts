@@ -10,6 +10,9 @@ import { getPrivateKey } from "./wallet.service.js";
 import { TXN_TYPES } from "../utils/constants.js";
 import { logger } from "../utils/logger.js";
 
+/**
+ * Result of a withdrawal operation
+ */
 export interface WithdrawResult {
   success: boolean;
   error?: string;
@@ -23,6 +26,18 @@ const ERC20_ABI = [
   "function transfer(address to, uint256 amount) returns (bool)",
 ];
 
+/**
+ * Withdraw tokens to an external wallet address
+ * @param discordId - Discord ID of the user
+ * @param toAddress - Destination wallet address
+ * @param amount - Amount to withdraw in raw units
+ * @param tokenSymbol - Token symbol (e.g., "ETH", "USDC")
+ * @param chainId - Blockchain identifier (e.g., "ethereum", "polygon")
+ * @param token - Token identifier ("native" or contract address)
+ * @param decimals - Token decimals for amount formatting
+ * @param isTestnet - Whether to use testnet or mainnet
+ * @returns WithdrawResult with transaction details
+ */
 export async function withdraw(
   discordId: string,
   toAddress: string,

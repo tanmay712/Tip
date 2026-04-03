@@ -68,20 +68,26 @@ export async function getUserBalance(
   });
 
   const totalReceived = receivedTxns.reduce(
-    (sum, t) => sum + BigInt(t.amount),
+    (sum: bigint, t: { amount: string }) => sum + BigInt(t.amount),
     0n,
   );
   const totalSent = sentTxns.reduce(
-    (sum, t) => sum + BigInt(t.amount),
+    (sum: bigint, t: { amount: string }) => sum + BigInt(t.amount),
     0n,
   );
-  return totalReceived - totalSent;
+  return BigInt(totalReceived) - BigInt(totalSent);
 }
 
+/**
+ * Get leaderboard of top tippers ranked by transaction count
+ * @param isTestnet - Whether to query testnet or mainnet transactions
+ * @param limit - Maximum number of entries to return (default: 10)
+ * @returns Array of leaderboard entries with user IDs, tip counts, and total amounts
+ */
 export async function getLeaderboard(
   isTestnet: boolean,
   limit = 10,
-) {
+): Promise<Array<{ userId: string; totalTips: number; totalAmount: string }>> {
   const results = await prisma.transaction.groupBy({
     by: ["senderId"],
     where: {
@@ -95,11 +101,36 @@ export async function getLeaderboard(
     take: limit,
   });
 
-  return results.map((r) => ({
-    userId: r.senderId!,
-    totalTips: r._count.id,
-    totalAmount: "0",
-  }));
+  // Calculate total amount for each user
+  const entries: Array<{ userId: string; totalTips: number; totalAmount: string }> = [];
+  
+  for (const result of results) {
+    if (!result.senderId) continue;
+    
+    // Sum all sent amounts for this user
+    const txns = await prisma.transaction.findMany({
+      where: {
+        senderId: result.senderId,
+        type: { in: ["tip", "rain", "airdrop"] },
+        isTestnet,
+        status: "completed",
+      },
+      select: { amount: true },
+    });
+    
+    const totalAmount = txns.reduce(
+      (sum: bigint, t: { amount: string }) => sum + BigInt(t.amount),
+      0n,
+    );
+    
+    entries.push({
+      userId: result.senderId,
+      totalTips: result._count.id,
+      totalAmount: totalAmount.toString(),
+    });
+  }
+
+  return entries;
 }
 
 export async function getTransactionCount(isTestnet: boolean): Promise<number> {

@@ -62,7 +62,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     withdraw: EMOJIS.withdraw,
   };
 
-  const lines = transactions.map((tx) => {
+  const lines = transactions.map((tx: { type: string; chain: string; senderId: string | null; amount: string; tokenSymbol: string; createdAt: Date }) => {
     const emoji = typeEmojis[tx.type] || "📝";
     const chain = getChain(tx.chain);
     const isSender = tx.senderId === user.id;

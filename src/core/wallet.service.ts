@@ -7,12 +7,22 @@ import * as walletRepo from "../database/repositories/wallet.repo.js";
 import * as userRepo from "../database/repositories/user.repo.js";
 import { logger } from "../utils/logger.js";
 
+/**
+ * Derive an EVM-compatible wallet from a seed buffer
+ * @param seed - 64-byte seed buffer for HD wallet derivation
+ * @returns Object containing the wallet address and private key
+ */
 function deriveEvmWallet(seed: Buffer): { address: string; privateKey: string } {
   const hdNode = ethers.HDNodeWallet.fromSeed(seed);
   const wallet = hdNode.derivePath("m/44'/60'/0'/0/0");
   return { address: wallet.address, privateKey: wallet.privateKey };
 }
 
+/**
+ * Derive a Solana wallet from a seed buffer
+ * @param seed - 64-byte seed buffer for keypair derivation
+ * @returns Object containing the wallet address and private key
+ */
 function deriveSolanaWallet(seed: Buffer): { address: string; privateKey: string } {
   const keypair = Keypair.fromSeed(seed.subarray(0, 32));
   return {
@@ -68,7 +78,7 @@ export async function getAllWallets(discordId: string, isTestnet: boolean) {
   const wallets = await walletRepo.getUserWallets(user.id, isTestnet);
 
   // Create wallets for any chains that don't exist yet
-  const existingChains = new Set(wallets.map((w) => w.chain));
+  const existingChains = new Set(wallets.map((w: { chain: string }) => w.chain));
   for (const chainId of CHAIN_IDS) {
     if (!existingChains.has(chainId)) {
       await getOrCreateWallet(discordId, chainId, isTestnet);

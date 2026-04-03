@@ -5,6 +5,9 @@ import { getChain } from "../blockchain/chains.js";
 import { TXN_TYPES } from "../utils/constants.js";
 import { logger } from "../utils/logger.js";
 
+/**
+ * Result of a tip operation
+ */
 export interface TipResult {
   success: boolean;
   error?: string;
@@ -13,6 +16,17 @@ export interface TipResult {
   chain: string;
 }
 
+/**
+ * Send an off-chain tip to another user
+ * @param senderDiscordId - Discord ID of the sender
+ * @param receiverDiscordId - Discord ID of the receiver
+ * @param amount - Amount in raw units (wei for EVM, lamports for Solana)
+ * @param tokenSymbol - Token symbol (e.g., "ETH", "USDC")
+ * @param chainId - Blockchain identifier (e.g., "ethereum", "polygon")
+ * @param token - Token identifier ("native" or contract address)
+ * @param isTestnet - Whether to use testnet or mainnet
+ * @returns TipResult indicating success or failure
+ */
 export async function sendTip(
   senderDiscordId: string,
   receiverDiscordId: string,

@@ -4,6 +4,9 @@ import { getOrCreateWallet } from "./wallet.service.js";
 import { TXN_TYPES, LIMITS } from "../utils/constants.js";
 import { logger } from "../utils/logger.js";
 
+/**
+ * Result of a rain operation
+ */
 export interface RainResult {
   success: boolean;
   error?: string;
@@ -14,6 +17,17 @@ export interface RainResult {
   chain: string;
 }
 
+/**
+ * Distribute tokens evenly among multiple recipients (rain)
+ * @param senderDiscordId - Discord ID of the sender
+ * @param recipientDiscordIds - Array of Discord IDs to receive tokens
+ * @param totalAmount - Total amount to distribute in raw units
+ * @param tokenSymbol - Token symbol (e.g., "ETH", "USDC")
+ * @param chainId - Blockchain identifier (e.g., "ethereum", "polygon")
+ * @param token - Token identifier ("native" or contract address)
+ * @param isTestnet - Whether to use testnet or mainnet
+ * @returns RainResult with distribution details
+ */
 export async function sendRain(
   senderDiscordId: string,
   recipientDiscordIds: string[],
