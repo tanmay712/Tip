@@ -1,6 +1,7 @@
 import { Alchemy, Network } from "alchemy-sdk";
 import { config } from "../config.js";
 import { CHAINS, getNetworkConfig } from "./chains.js";
+import { logger } from "../utils/logger.js";
 
 const clients = new Map<string, Alchemy>();
 
@@ -72,6 +73,24 @@ export async function getAssetTransfers(
   else params.toAddress = address;
 
   return alchemy.core.getAssetTransfers(params as never);
+}
+
+/**
+ * Validate that the configured Alchemy API key can reach the network.
+ * Logs a warning on failure rather than throwing, so startup can continue
+ * with a degraded-but-running bot (balance/withdraw commands will fail).
+ */
+export async function validateAlchemyConnection(): Promise<void> {
+  try {
+    const alchemy = getAlchemy("ethereum", false);
+    await alchemy.core.getBlockNumber();
+    logger.info("Alchemy API connection validated successfully");
+  } catch (err) {
+    logger.error(
+      { err },
+      "Alchemy API connection failed — verify ALCHEMY_API_KEY is correct and has the required network permissions",
+    );
+  }
 }
 
 export function getAllAlchemyNetworks(): { chainId: string; network: Network; isTestnet: boolean }[] {

@@ -9,6 +9,7 @@ import { config } from "../config.js";
 import { logger } from "../utils/logger.js";
 import { registerEvents } from "./events/ready.js";
 import { registerInteractionHandler } from "./events/interactionCreate.js";
+import { registerMessageHandler } from "./events/messageCreate.js";
 
 export interface BotCommand {
   data: { name: string; toJSON?: () => unknown };
@@ -30,6 +31,7 @@ export function createClient(): Client {
 
   registerEvents(client);
   registerInteractionHandler(client);
+  registerMessageHandler(client);
 
   return client;
 }

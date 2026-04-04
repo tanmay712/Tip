@@ -3,7 +3,6 @@ import * as userRepo from "../../database/repositories/user.repo.js";
 import * as txRepo from "../../database/repositories/transaction.repo.js";
 import { getOrCreateWallet } from "../../core/wallet.service.js";
 import { CHAIN_IDS, getChain } from "../../blockchain/chains.js";
-import { getTokensForChain } from "../../blockchain/tokens.js";
 import * as alchemyApi from "../../blockchain/alchemy.js";
 import { getSolBalance } from "../../blockchain/solana.js";
 import { balanceEmbed, brandEmbed, errorEmbed } from "../components/embeds.js";

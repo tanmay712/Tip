@@ -1,3 +1,5 @@
+export const PREFIX = "$";
+
 export const BRAND = {
   name: "Hodlr",
   color: 0x00d4aa,
