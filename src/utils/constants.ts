@@ -3,7 +3,7 @@ export const PREFIX = "$";
 export const BRAND = {
   name: "Hodlr",
   color: 0x00d4aa,
-  icon: "https://avatars.githubusercontent.com/u/97213385?v=4",
+  icon: "https://i.ibb.co/qYZX9N8x/grok-image-1775350673726.jpg",
   tagline: "Tip crypto. Instantly.",
 } as const;
 
