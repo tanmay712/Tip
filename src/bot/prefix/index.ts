@@ -1,4 +1,6 @@
 import { type Message, type GuildMember } from "discord.js";
+import { ethers } from "ethers";
+import { PublicKey } from "@solana/web3.js";
 import { CHAIN_IDS, getChain } from "../../blockchain/chains.js";
 import { findToken } from "../../blockchain/tokens.js";
 import * as userRepo from "../../database/repositories/user.repo.js";
@@ -8,6 +10,7 @@ import { sendTip } from "../../core/tip.service.js";
 import { sendRain } from "../../core/rain.service.js";
 import { getLeaderboard } from "../../core/leaderboard.service.js";
 import { getPrice } from "../../core/price.service.js";
+import { withdraw } from "../../core/withdraw.service.js";
 import * as alchemyApi from "../../blockchain/alchemy.js";
 import { getSolBalance } from "../../blockchain/solana.js";
 import { parseTokenAmount, formatTokenAmount, formatUsd } from "../../utils/format.js";
@@ -19,6 +22,7 @@ import {
   successEmbed,
   brandEmbed,
   walletEmbed,
+  withdrawEmbed,
 } from "../components/embeds.js";
 import { BRAND, EMOJIS, PREFIX, LIMITS } from "../../utils/constants.js";
 
@@ -27,20 +31,23 @@ const MEDALS = ["🥇", "🥈", "🥉"];
 const COMMAND_HELP: Record<string, { usage: string; description: string }> = {
   tip: {
     usage: `${PREFIX}tip @user <amount> <token> [chain]`,
-    description:
-      "Send an instant off-chain tip to another user. Example: `!tip @alice 0.01 ETH`",
+    description: "Send an instant off-chain tip. Example: `$tip @alice 0.01 ETH`",
   },
   rain: {
     usage: `${PREFIX}rain <amount> <token> [chain]`,
-    description: "Distribute tokens evenly among recent active members.",
+    description: "Distribute tokens evenly among active members.",
   },
   balance: {
     usage: `${PREFIX}balance [chain]`,
-    description: "Check your token balances. Specify a chain for a detailed view.",
+    description: "Check balances. Specify a chain for on-chain detail.",
   },
   wallet: {
     usage: `${PREFIX}wallet [deposit <chain>]`,
-    description: "View your wallets or get a deposit address for a specific chain.",
+    description: "View wallets or get a deposit address.",
+  },
+  withdraw: {
+    usage: `${PREFIX}withdraw <chain> <address> <amount> <token>`,
+    description: "Withdraw tokens to an external address.",
   },
   network: {
     usage: `${PREFIX}network [mainnet|testnet]`,
@@ -48,11 +55,11 @@ const COMMAND_HELP: Record<string, { usage: string; description: string }> = {
   },
   price: {
     usage: `${PREFIX}price <token>`,
-    description: "Check the current USD price and 24h change for a token.",
+    description: "Check the current USD price and 24h change.",
   },
   leaderboard: {
     usage: `${PREFIX}leaderboard [limit]`,
-    description: "See the top tippers in the community.",
+    description: "See the top tippers.",
   },
 };
 
@@ -73,6 +80,7 @@ export async function handlePrefixCommand(message: Message): Promise<void> {
     case "wallet":      return handleWallet(message, args);
     case "rain":        return handleRain(message, args);
     case "leaderboard": return handleLeaderboard(message, args);
+    case "withdraw":    return handleWithdraw(message, args);
     default:
       await message.reply({
         embeds: [
@@ -83,8 +91,6 @@ export async function handlePrefixCommand(message: Message): Promise<void> {
       });
   }
 }
-
-// ─── Help ────────────────────────────────────────────────────────────────────
 
 async function handleHelp(message: Message, args: string[]): Promise<void> {
   const specificCmd = args[0]?.toLowerCase();
@@ -113,13 +119,11 @@ async function handleHelp(message: Message, args: string[]): Promise<void> {
     embeds: [
       brandEmbed()
         .setTitle(`${BRAND.name} — ${BRAND.tagline}`)
-        .setDescription(
-          `A modern crypto tipping bot. Use \`${PREFIX}<command>\` or slash commands.`,
-        )
+        .setDescription(`Use \`${PREFIX}<command>\` or slash commands.`)
         .addFields(
-          { name: `${EMOJIS.tip} Tipping`,   value: `\`${PREFIX}tip\` \`${PREFIX}rain\``, inline: true },
-          { name: `${EMOJIS.wallet} Wallet`,  value: `\`${PREFIX}wallet\` \`${PREFIX}balance\``, inline: true },
-          { name: `${EMOJIS.history} Info`,   value: `\`${PREFIX}leaderboard\` \`${PREFIX}price\``, inline: true },
+          { name: `${EMOJIS.tip} Tipping`,     value: `\`${PREFIX}tip\` \`${PREFIX}rain\``, inline: true },
+          { name: `${EMOJIS.wallet} Wallet`,    value: `\`${PREFIX}wallet\` \`${PREFIX}balance\` \`${PREFIX}withdraw\``, inline: true },
+          { name: `${EMOJIS.history} Info`,     value: `\`${PREFIX}leaderboard\` \`${PREFIX}price\``, inline: true },
           { name: `${EMOJIS.network} Settings`, value: `\`${PREFIX}network\` \`${PREFIX}help\``, inline: true },
           { name: "Supported Chains", value: chainList, inline: false },
         ),
@@ -127,14 +131,10 @@ async function handleHelp(message: Message, args: string[]): Promise<void> {
   });
 }
 
-// ─── Tip ─────────────────────────────────────────────────────────────────────
-
 async function handleTip(message: Message, args: string[]): Promise<void> {
   const target = message.mentions.users.first();
   if (!target) {
-    await message.reply({
-      embeds: [errorEmbed(`Usage: \`${COMMAND_HELP.tip.usage}\``)],
-    });
+    await message.reply({ embeds: [errorEmbed(`Usage: \`${COMMAND_HELP.tip.usage}\``)] });
     return;
   }
   if (target.id === message.author.id) {
@@ -146,14 +146,11 @@ async function handleTip(message: Message, args: string[]): Promise<void> {
     return;
   }
 
-  // Strip mention tokens so remaining args are: amount, token, [chain]
   const nonMentionArgs = args.filter((a) => !a.match(/^<@!?\d+>$/));
   const [amountStr, tokenRaw, chainArg] = nonMentionArgs;
 
   if (!amountStr || !tokenRaw) {
-    await message.reply({
-      embeds: [errorEmbed(`Usage: \`${COMMAND_HELP.tip.usage}\``)],
-    });
+    await message.reply({ embeds: [errorEmbed(`Usage: \`${COMMAND_HELP.tip.usage}\``)] });
     return;
   }
 
@@ -182,9 +179,7 @@ async function handleTip(message: Message, args: string[]): Promise<void> {
   if (tokenSymbol !== chain.nativeToken) {
     const tokenInfo = findToken(tokenSymbol, chainId);
     if (!tokenInfo) {
-      await message.reply({
-        embeds: [errorEmbed(`Token ${tokenSymbol} not found on ${chain.name}`)],
-      });
+      await message.reply({ embeds: [errorEmbed(`Token ${tokenSymbol} not found on ${chain.name}`)] });
       return;
     }
     token = tokenInfo.contractAddress;
@@ -236,11 +231,9 @@ async function handleTip(message: Message, args: string[]): Promise<void> {
       ],
     });
   } catch {
-    // Recipient has DMs disabled
+    // DMs disabled
   }
 }
-
-// ─── Balance ─────────────────────────────────────────────────────────────────
 
 async function handleBalance(message: Message, args: string[]): Promise<void> {
   const network = await userRepo.getUserNetwork(message.author.id);
@@ -278,11 +271,7 @@ async function handleBalance(message: Message, args: string[]): Promise<void> {
         for (const tb of tokenBals) {
           const meta = await alchemyApi.getTokenMetadata(specificChain, tb.contractAddress, isTestnet);
           if (meta.symbol) {
-            balances.push({
-              symbol: meta.symbol,
-              amount: tb.balance,
-              decimals: meta.decimals ?? 18,
-            });
+            balances.push({ symbol: meta.symbol, amount: tb.balance, decimals: meta.decimals ?? 18 });
           }
         }
       } catch {
@@ -292,7 +281,6 @@ async function handleBalance(message: Message, args: string[]): Promise<void> {
 
     await message.reply({ embeds: [balanceEmbed({ chainId: specificChain, balances, isTestnet })] });
   } else {
-    // Summary view — show internal (tip/rain) balances across all chains
     const embed = brandEmbed()
       .setTitle(`${EMOJIS.wallet} All Balances`)
       .setDescription(isTestnet ? `${EMOJIS.testnet} Testnet` : `${EMOJIS.mainnet} Mainnet`);
@@ -321,8 +309,6 @@ async function handleBalance(message: Message, args: string[]): Promise<void> {
   }
 }
 
-// ─── Network ─────────────────────────────────────────────────────────────────
-
 async function handleNetwork(message: Message, args: string[]): Promise<void> {
   const mode = args[0]?.toLowerCase();
 
@@ -340,9 +326,7 @@ async function handleNetwork(message: Message, args: string[]): Promise<void> {
   }
 
   if (mode !== "mainnet" && mode !== "testnet") {
-    await message.reply({
-      embeds: [errorEmbed(`Use \`mainnet\` or \`testnet\``)],
-    });
+    await message.reply({ embeds: [errorEmbed("Use `mainnet` or `testnet`")] });
     return;
   }
 
@@ -360,22 +344,16 @@ async function handleNetwork(message: Message, args: string[]): Promise<void> {
   });
 }
 
-// ─── Price ───────────────────────────────────────────────────────────────────
-
 async function handlePrice(message: Message, args: string[]): Promise<void> {
   const symbol = args[0]?.toUpperCase();
   if (!symbol) {
-    await message.reply({
-      embeds: [errorEmbed(`Usage: \`${COMMAND_HELP.price.usage}\``)],
-    });
+    await message.reply({ embeds: [errorEmbed(`Usage: \`${COMMAND_HELP.price.usage}\``)] });
     return;
   }
 
   const info = await getPrice(symbol);
   if (!info) {
-    await message.reply({
-      embeds: [errorEmbed(`Price data not available for **${symbol}**`)],
-    });
+    await message.reply({ embeds: [errorEmbed(`Price data not available for **${symbol}**`)] });
     return;
   }
 
@@ -396,8 +374,6 @@ async function handlePrice(message: Message, args: string[]): Promise<void> {
   });
 }
 
-// ─── Wallet ──────────────────────────────────────────────────────────────────
-
 async function handleWallet(message: Message, args: string[]): Promise<void> {
   const network = await userRepo.getUserNetwork(message.author.id);
   const isTestnet = network === "testnet";
@@ -407,24 +383,17 @@ async function handleWallet(message: Message, args: string[]): Promise<void> {
     const chainId = args[1]?.toLowerCase();
     if (!chainId || !CHAIN_IDS.includes(chainId)) {
       await message.reply({
-        embeds: [
-          errorEmbed(
-            `Specify a valid chain. Valid chains: ${CHAIN_IDS.join(", ")}`,
-          ),
-        ],
+        embeds: [errorEmbed(`Specify a valid chain: ${CHAIN_IDS.join(", ")}`)],
       });
       return;
     }
     const { address } = await getOrCreateWallet(message.author.id, chainId, isTestnet);
     const embed = walletEmbed({ chain: chainId, address, isTestnet });
-    embed.setDescription(
-      `Send ${getChain(chainId).nativeToken} or tokens to this address to deposit.`,
-    );
+    embed.setDescription(`Send ${getChain(chainId).nativeToken} or tokens to this address to deposit.`);
     await message.reply({ embeds: [embed] });
     return;
   }
 
-  // Default: show all wallets
   const wallets = await getAllWallets(message.author.id, isTestnet);
   const embed = brandEmbed()
     .setTitle(`${EMOJIS.wallet} Your Wallets`)
@@ -434,24 +403,102 @@ async function handleWallet(message: Message, args: string[]): Promise<void> {
 
   for (const w of wallets) {
     const chain = getChain(w.chain);
-    embed.addFields({
-      name: `${chain.emoji} ${chain.name}`,
-      value: `\`${w.address}\``,
-      inline: false,
-    });
+    embed.addFields({ name: `${chain.emoji} ${chain.name}`, value: `\`${w.address}\``, inline: false });
   }
 
   await message.reply({ embeds: [embed] });
 }
 
-// ─── Rain ────────────────────────────────────────────────────────────────────
+async function handleWithdraw(message: Message, args: string[]): Promise<void> {
+  const [chainArg, toAddress, amountStr, tokenRaw] = args;
+
+  if (!chainArg || !toAddress || !amountStr || !tokenRaw) {
+    await message.reply({ embeds: [errorEmbed(`Usage: \`${COMMAND_HELP.withdraw.usage}\``)] });
+    return;
+  }
+
+  const chainId = chainArg.toLowerCase();
+  if (!CHAIN_IDS.includes(chainId)) {
+    await message.reply({
+      embeds: [errorEmbed(`Unknown chain \`${chainId}\`. Valid: ${CHAIN_IDS.join(", ")}`)],
+    });
+    return;
+  }
+
+  const chain = getChain(chainId);
+
+  if (chain.type === "solana") {
+    try {
+      new PublicKey(toAddress);
+    } catch {
+      await message.reply({ embeds: [errorEmbed("Invalid Solana address")] });
+      return;
+    }
+  } else {
+    if (!ethers.isAddress(toAddress)) {
+      await message.reply({ embeds: [errorEmbed("Invalid EVM address")] });
+      return;
+    }
+  }
+
+  const amount = parseFloat(amountStr);
+  if (isNaN(amount) || amount <= 0) {
+    await message.reply({ embeds: [errorEmbed("Invalid amount")] });
+    return;
+  }
+
+  const tokenSymbol = tokenRaw.toUpperCase();
+  const network = await userRepo.getUserNetwork(message.author.id);
+  const isTestnet = network === "testnet";
+
+  let token = "native";
+  let decimals = chain.nativeDecimals;
+  if (tokenSymbol !== chain.nativeToken) {
+    const tokenInfo = findToken(tokenSymbol, chainId);
+    if (!tokenInfo) {
+      await message.reply({ embeds: [errorEmbed(`Token ${tokenSymbol} not found on ${chain.name}`)] });
+      return;
+    }
+    token = tokenInfo.contractAddress;
+    decimals = tokenInfo.decimals;
+  }
+
+  const rawAmount = parseTokenAmount(amountStr, decimals).toString();
+  const result = await withdraw(
+    message.author.id,
+    toAddress,
+    rawAmount,
+    tokenSymbol,
+    chainId,
+    token,
+    decimals,
+    isTestnet,
+  );
+
+  if (!result.success) {
+    await message.reply({ embeds: [errorEmbed(result.error!)] });
+    return;
+  }
+
+  await message.reply({
+    embeds: [
+      withdrawEmbed({
+        chainId,
+        txHash: result.txHash!,
+        amount: rawAmount,
+        decimals,
+        tokenSymbol,
+        toAddress,
+        isTestnet,
+      }),
+    ],
+  });
+}
 
 async function handleRain(message: Message, args: string[]): Promise<void> {
   const [amountStr, tokenRaw, chainArg] = args;
   if (!amountStr || !tokenRaw) {
-    await message.reply({
-      embeds: [errorEmbed(`Usage: \`${COMMAND_HELP.rain.usage}\``)],
-    });
+    await message.reply({ embeds: [errorEmbed(`Usage: \`${COMMAND_HELP.rain.usage}\``)] });
     return;
   }
 
@@ -486,9 +533,7 @@ async function handleRain(message: Message, args: string[]): Promise<void> {
   if (tokenSymbol !== chain.nativeToken) {
     const tokenInfo = findToken(tokenSymbol, chainId);
     if (!tokenInfo) {
-      await message.reply({
-        embeds: [errorEmbed(`Token ${tokenSymbol} not found on ${chain.name}`)],
-      });
+      await message.reply({ embeds: [errorEmbed(`Token ${tokenSymbol} not found on ${chain.name}`)] });
       return;
     }
     token = tokenInfo.contractAddress;
@@ -537,8 +582,6 @@ async function handleRain(message: Message, args: string[]): Promise<void> {
     ],
   });
 }
-
-// ─── Leaderboard ─────────────────────────────────────────────────────────────
 
 async function handleLeaderboard(message: Message, args: string[]): Promise<void> {
   const network = await userRepo.getUserNetwork(message.author.id);

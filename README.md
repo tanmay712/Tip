@@ -2,107 +2,104 @@
 
 > Tip crypto. Instantly.
 
-A modern Discord crypto tipping bot powered by [Alchemy](https://www.alchemy.com/). Send tips, rain tokens, and create airdrops across **8 blockchains** with full **testnet** and **mainnet** support.
+A Discord crypto tipping bot powered by [Alchemy](https://www.alchemy.com/). Send tips, rain tokens, create airdrops, deposit and withdraw across **8 blockchains** with full **testnet** and **mainnet** support.
 
 ---
 
 ## Features
 
-| Feature | Description |
-|---------|-------------|
-| `/tip` | Send instant off-chain tips to any user |
-| `/rain` | Distribute tokens to active channel members |
-| `/airdrop` | Create first-come-first-served claim drops |
-| `/wallet` | View deposit addresses across all chains |
-| `/balance` | Check on-chain + internal balances |
-| `/history` | Browse transaction history with filters |
-| `/leaderboard` | See the top tippers |
-| `/price` | Live token prices with 24h change |
-| `/network` | Toggle between mainnet and testnet |
-| `/help` | Command reference |
+| Feature | Slash | Prefix | Description |
+|---------|-------|--------|-------------|
+| Tip | `/tip` | `$tip` | Instant off-chain tips between users |
+| Rain | `/rain` | `$rain` | Distribute tokens to active members |
+| Airdrop | `/airdrop` | — | First-come-first-served claim drops |
+| Wallet | `/wallet` | `$wallet` | View, deposit, and withdraw |
+| Balance | `/balance` | `$balance` | On-chain + internal balances |
+| History | `/history` | — | Transaction history with filters |
+| Leaderboard | `/leaderboard` | `$leaderboard` | Top tippers |
+| Price | `/price` | `$price` | Live token prices with 24h change |
+| Network | `/network` | `$network` | Toggle mainnet / testnet |
+| Help | `/help` | `$help` | Command reference |
 
 ## Supported Chains
 
-| Chain | Mainnet | Testnet | Native Token |
-|-------|---------|---------|--------------|
-| Ethereum | eth-mainnet | eth-sepolia | ETH |
-| Polygon | polygon-mainnet | polygon-amoy | POL |
-| Arbitrum | arb-mainnet | arb-sepolia | ETH |
-| Optimism | opt-mainnet | opt-sepolia | ETH |
-| Base | base-mainnet | base-sepolia | ETH |
-| zkSync | zksync-mainnet | zksync-sepolia | ETH |
-| Avalanche | avax-mainnet | avax-fuji | AVAX |
-| Solana | solana-mainnet | solana-devnet | SOL |
+| Chain | Mainnet | Testnet | Native |
+|-------|---------|---------|--------|
+| Ethereum | ✅ | Sepolia | ETH |
+| Polygon | ✅ | Amoy | POL |
+| Arbitrum | ✅ | Sepolia | ETH |
+| Optimism | ✅ | Sepolia | ETH |
+| Base | ✅ | Sepolia | ETH |
+| zkSync | ✅ | Sepolia | ETH |
+| Avalanche | ✅ | Fuji | AVAX |
+| Solana | ✅ | Devnet | SOL |
+
+## How Deposits Work
+
+Deposits are detected automatically — no webhook setup required. The bot polls every 60 seconds using Alchemy's `getAssetTransfers` API for all registered wallet addresses. Duplicate transactions are filtered by hash so nothing gets credited twice. Alchemy webhooks are still supported if you want real-time detection (`ALCHEMY_WEBHOOK_SIGNING_KEY` + POST `/webhooks/alchemy`).
 
 ## Quick Start
 
-### Prerequisites
-
-- Node.js 20+
-- Discord Bot Token ([Discord Developer Portal](https://discord.com/developers/applications))
-- Alchemy API Key ([alchemy.com](https://www.alchemy.com/))
-
-### Setup
-
 ```bash
-# Clone
 git clone https://github.com/HiLleywyn/hodlr.git
 cd hodlr
-
-# Install
 npm install
-
-# Configure
 cp .env.example .env
-# Edit .env with your tokens and keys
+```
 
-# Generate encryption secret (32 bytes hex)
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+Edit `.env` — minimum required:
 
-# Database
-npx prisma migrate dev --name init
+```env
+DISCORD_TOKEN=
+DISCORD_CLIENT_ID=
+ALCHEMY_API_KEY=
+ENCRYPTION_SECRET=   # openssl rand -hex 32
+```
 
-# Register slash commands
+```bash
+npx prisma db push
 npm run deploy-commands
-
-# Start
 npm run dev
 ```
 
-### Environment Variables
+## Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DISCORD_TOKEN` | Yes | Discord bot token |
-| `DISCORD_CLIENT_ID` | Yes | Discord application client ID |
-| `DISCORD_GUILD_ID` | No | Restrict commands to one guild (dev mode) |
-| `ALCHEMY_API_KEY` | Yes | Alchemy API key |
-| `ALCHEMY_WEBHOOK_SIGNING_KEY` | No | For deposit webhook verification |
-| `ENCRYPTION_SECRET` | Yes | 32-byte hex string for wallet encryption |
-| `DATABASE_URL` | No | Database URL (default: SQLite) |
-| `API_PORT` | No | API server port (default: 3000) |
-| `DEFAULT_NETWORK` | No | Default network: mainnet or testnet |
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `DISCORD_TOKEN` | Yes | — | Bot token from Discord Developer Portal |
+| `DISCORD_CLIENT_ID` | Yes | — | Application Client ID |
+| `DISCORD_GUILD_ID` | No | — | Dev mode: restrict commands to one guild |
+| `ALCHEMY_API_KEY` | Yes | — | Alchemy API key |
+| `ALCHEMY_WEBHOOK_SIGNING_KEY` | No | — | Optional: verify incoming Alchemy webhooks |
+| `ENCRYPTION_SECRET` | Yes | — | 32-byte hex string for AES-256-GCM key encryption |
+| `DATABASE_URL` | No | `file:/app/data/hodlr.db` | SQLite or Postgres URL |
+| `API_PORT` | No | `3000` | HTTP server port |
+| `API_HOST` | No | `0.0.0.0` | HTTP server host |
+| `DEFAULT_NETWORK` | No | `mainnet` | Default network for new users |
+
+Generate `ENCRYPTION_SECRET`:
+
+```bash
+openssl rand -hex 32
+```
 
 ## Architecture
 
 ```
 src/
-├── index.ts          # Entry point
-├── config.ts         # Environment config
-├── bot/              # Discord bot (commands, events, components)
-├── core/             # Business logic (wallet, tip, rain, airdrop)
-├── blockchain/       # Alchemy SDK + ethers.js + Solana
-├── database/         # Prisma ORM + repositories
-├── api/              # Fastify REST API + webhooks
-└── utils/            # Crypto, formatting, logging
+├── index.ts              # Entry point — DB, API, poller, bot
+├── config.ts             # Env config
+├── bot/
+│   ├── commands/         # 10 slash commands
+│   ├── prefix/           # Prefix command router ($)
+│   ├── events/           # ready, interactionCreate, messageCreate, guildMemberAdd
+│   └── components/       # Embeds, buttons, pagination
+├── core/                 # Business logic — tip, rain, airdrop, withdraw, deposit
+├── blockchain/           # Alchemy SDK, ethers.js, Solana web3, providers
+├── database/             # Prisma client + repositories
+├── api/                  # Fastify — /health, /stats, /webhooks/alchemy
+└── utils/                # Crypto, format, logger, rate-limit, constants
 ```
-
-### How Tipping Works
-
-1. **Off-chain tips**: Tips between Hodlr users are instant database transfers — no gas, no fees
-2. **Deposits**: Users deposit on-chain to their Hodlr wallet address. Detected via Alchemy webhooks
-3. **Withdrawals**: Users withdraw to external addresses — signed and broadcast on-chain
-4. **Wallets**: HD-derived per chain, encrypted with AES-256-GCM at rest
 
 ## Deployment
 
@@ -114,9 +111,10 @@ docker-compose up -d
 
 ### Railway
 
-1. Connect your repo to [Railway](https://railway.app)
-2. Set environment variables in the Railway dashboard
-3. Deploy — Railway will use the included `railway.toml` and `Dockerfile`
+1. Connect repo to [Railway](https://railway.app)
+2. Set env vars in the Railway dashboard
+3. Add a Volume mounted at `/app/data` (for SQLite persistence), or add the Postgres plugin
+4. Deploy — uses `railway.toml` + `Dockerfile` automatically
 
 ### Manual
 
@@ -126,39 +124,32 @@ npx prisma migrate deploy
 npm start
 ```
 
-## API Endpoints
+## API
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/health` | Health check |
-| `GET` | `/stats` | Bot statistics |
-| `POST` | `/webhooks/alchemy` | Alchemy deposit webhooks |
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/health` | None | Liveness check |
+| `GET` | `/stats` | None | User, wallet, transaction counts |
+| `POST` | `/webhooks/alchemy` | HMAC-SHA256 | Real-time deposit events from Alchemy |
 
 ## Security
 
-- Private keys encrypted with **AES-256-GCM** using a server-side secret
-- Alchemy webhook signatures verified via HMAC-SHA256
-- Per-user rate limiting on all commands
-- Ephemeral replies for sensitive data (wallets, balances)
-- No private keys ever leave the server
+- Private keys encrypted at rest with **AES-256-GCM**
+- Alchemy webhook payloads verified via HMAC-SHA256
+- Per-user rate limiting: 10 commands/minute
+- Sensitive replies (wallets, balances) are ephemeral
+- Keys never leave the server
 
 ## Development
 
 ```bash
-# Dev mode with hot reload
-npm run dev
-
-# Build
-npm run build
-
-# Generate Prisma client after schema changes
-npm run db:generate
-
-# Run migrations
-npm run db:migrate
-
-# Generate TypeDoc
-npm run typedoc
+npm run dev           # Hot-reload dev server
+npm run build         # TypeScript compile
+npm run deploy-commands  # Register slash commands
+npm run db:migrate    # Run Prisma migrations
+npm run db:generate   # Regenerate Prisma client
+npm run format        # Prettier
+npm run lint          # ESLint
 ```
 
 ## License
@@ -167,4 +158,4 @@ Copyright (c) 2026 HiLleywyn. All Rights Reserved.
 
 ---
 
-Built with [Discord.js](https://discord.js.org/) | [Alchemy SDK](https://www.alchemy.com/sdk) | [ethers.js](https://docs.ethers.org/) | [Prisma](https://www.prisma.io/) | [Fastify](https://fastify.dev/)
+Built with [Discord.js](https://discord.js.org/) · [Alchemy SDK](https://www.alchemy.com/sdk) · [ethers.js](https://docs.ethers.org/) · [Prisma](https://www.prisma.io/) · [Fastify](https://fastify.dev/)

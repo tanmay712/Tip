@@ -10,6 +10,7 @@ import { logger } from "../utils/logger.js";
 import { registerEvents } from "./events/ready.js";
 import { registerInteractionHandler } from "./events/interactionCreate.js";
 import { registerMessageHandler } from "./events/messageCreate.js";
+import { registerGuildMemberEvents } from "./events/guildMemberAdd.js";
 
 export interface BotCommand {
   data: { name: string; toJSON?: () => unknown };
@@ -32,6 +33,7 @@ export function createClient(): Client {
   registerEvents(client);
   registerInteractionHandler(client);
   registerMessageHandler(client);
+  registerGuildMemberEvents(client);
 
   return client;
 }
@@ -39,7 +41,6 @@ export function createClient(): Client {
 export async function startBot(): Promise<Client> {
   const client = createClient();
 
-  // Dynamically load commands
   const commandModules = await Promise.all([
     import("./commands/wallet.js"),
     import("./commands/tip.js"),

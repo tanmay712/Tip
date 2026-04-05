@@ -1,31 +1,33 @@
 ---
 title: Commands
-description: Complete reference for all Hodlr slash commands
+description: Complete reference for all Hodlr slash and prefix commands
 ---
 
-## Tipping Commands
+All commands are available as Discord slash commands (`/command`) and prefix commands (`$command`).
 
-### `/tip`
+## Tipping
 
-Send an instant tip to another Discord user.
+### `/tip` · `$tip @user <amount> <token> [chain]`
+
+Send an instant off-chain tip to another user.
 
 | Option | Required | Description |
 |--------|----------|-------------|
 | `user` | Yes | The user to tip |
 | `amount` | Yes | Amount to send |
-| `token` | Yes | Token symbol (e.g., ETH, USDC) |
-| `chain` | No | Blockchain (defaults to Ethereum) |
+| `token` | Yes | Token symbol (e.g. ETH, USDC) |
+| `chain` | No | Blockchain — defaults to Ethereum |
 
 ```
 /tip @alice 0.01 ETH
-/tip @bob 5 USDC chain:polygon
+$tip @alice 0.01 ETH polygon
 ```
 
-Tips are **off-chain** — instant with zero gas fees. The recipient receives a DM notification.
+Tips are instant and gas-free. The recipient gets a DM notification.
 
 ---
 
-### `/rain`
+### `/rain` · `$rain <amount> <token> [chain]`
 
 Distribute tokens evenly among active server members.
 
@@ -33,145 +35,115 @@ Distribute tokens evenly among active server members.
 |--------|----------|-------------|
 | `amount` | Yes | Total amount to distribute |
 | `token` | Yes | Token symbol |
-| `chain` | No | Blockchain (defaults to Ethereum) |
+| `chain` | No | Blockchain — defaults to Ethereum |
 
 ```
 /rain 1 ETH
-/rain 100 USDC chain:arbitrum
+$rain 100 USDC arbitrum
 ```
 
-Rain picks up to 50 active members in the server and splits the amount evenly.
+Splits the amount across up to 50 members.
 
 ---
 
-### `/airdrop`
+### `/airdrop` · slash only
 
-Create a first-come-first-served claimable airdrop.
+Create a first-come-first-served claimable airdrop with a Claim button.
 
 | Option | Required | Description |
 |--------|----------|-------------|
-| `amount` | Yes | Total amount to airdrop |
+| `amount` | Yes | Total amount |
 | `token` | Yes | Token symbol |
-| `slots` | Yes | Number of claim slots (1-100) |
-| `chain` | No | Blockchain (defaults to Ethereum) |
+| `slots` | Yes | Number of claim slots (1–100) |
+| `chain` | No | Blockchain — defaults to Ethereum |
 
 ```
 /airdrop 0.5 ETH 10
 /airdrop 50 USDC 25 chain:base
 ```
 
-Creates a message with a **Claim** button. Each user can claim once. Airdrops expire after 1 hour.
+Each user can claim once. Expires after 1 hour.
 
 ---
 
-## Wallet Commands
+## Wallet
 
-### `/wallet view`
+### `/wallet view` · `$wallet`
 
-View all your wallet addresses across every supported chain.
+View all your wallet addresses across every chain.
 
-### `/wallet deposit`
+### `/wallet deposit` · `$wallet deposit <chain>`
 
-Get your deposit address for a specific chain.
-
-| Option | Required | Description |
-|--------|----------|-------------|
-| `chain` | Yes | The blockchain to deposit to |
+Get your deposit address for a specific chain. Deposits are detected automatically by the polling system — no webhook setup needed.
 
 ```
 /wallet deposit chain:ethereum
-/wallet deposit chain:solana
+$wallet deposit solana
+```
+
+### `/wallet withdraw` · `$withdraw <chain> <address> <amount> <token>`
+
+Withdraw tokens to an external wallet address. The transaction is signed and broadcast on-chain.
+
+```
+/wallet withdraw chain:ethereum address:0x... amount:0.01 token:ETH
+$withdraw ethereum 0x... 0.01 ETH
 ```
 
 ---
 
-### `/balance`
+## Balance
 
-Check your token balances (on-chain + internal from tips).
+### `/balance` · `$balance [chain]`
 
-| Option | Required | Description |
-|--------|----------|-------------|
-| `chain` | No | Specific chain (shows all if omitted) |
+Check your balances. Without a chain, shows internal (tip/rain) balances across all chains. Specify a chain for a full on-chain view including ERC20 tokens.
 
 ```
 /balance
-/balance chain:polygon
+/balance chain:ethereum
+$balance ethereum
 ```
 
 ---
 
-## Info Commands
+## Info
 
-### `/history`
+### `/history` · slash only
 
-View your transaction history.
+View your transaction history with optional filters.
 
 | Option | Required | Description |
 |--------|----------|-------------|
 | `type` | No | Filter: tip, rain, airdrop, deposit, withdraw |
 | `page` | No | Page number |
 
-```
-/history
-/history type:tip page:2
-```
+### `/leaderboard` · `$leaderboard [limit]`
+
+Top tippers ranked by total tips sent. Limit defaults to 10, max 25.
+
+### `/price` · `$price <token>`
+
+Live USD price and 24h change. Supported: ETH, SOL, AVAX, POL, ARB, OP, USDC, USDT, DAI, LINK, WETH, BTC.
 
 ---
 
-### `/leaderboard`
+## Settings
 
-See the top tippers in the community.
+### `/network` · `$network [mainnet|testnet]`
 
-| Option | Required | Description |
-|--------|----------|-------------|
-| `limit` | No | Number of entries (default: 10, max: 25) |
-
----
-
-### `/price`
-
-Check the current USD price of a token.
-
-| Option | Required | Description |
-|--------|----------|-------------|
-| `token` | Yes | Token symbol (e.g., ETH, SOL, BTC) |
-
-```
-/price ETH
-/price SOL
-```
-
----
-
-## Settings Commands
-
-### `/network`
-
-Switch between mainnet and testnet, or view your current network.
-
-| Option | Required | Description |
-|--------|----------|-------------|
-| `mode` | No | `mainnet` or `testnet` (shows current if omitted) |
+View or switch your network. All commands respect your network setting. Omit the mode to see what you're currently on.
 
 ```
 /network testnet
-/network mainnet
-/network
+$network mainnet
+$network
 ```
 
-All commands respect your current network setting.
+### `/help` · `$help [command]`
 
----
-
-### `/help`
-
-View the command reference or get help for a specific command.
-
-| Option | Required | Description |
-|--------|----------|-------------|
-| `command` | No | Specific command to get help for |
+Command reference. Pass a command name for detailed usage.
 
 ```
-/help
 /help command:tip
+$help withdraw
 ```

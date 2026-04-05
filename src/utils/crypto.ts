@@ -5,19 +5,10 @@ const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 16;
 const TAG_LENGTH = 16;
 
-/**
- * Get the encryption key from config
- * @returns Buffer containing the encryption key
- */
 function getKey(): Buffer {
   return Buffer.from(config.encryption.secret, "hex");
 }
 
-/**
- * Encrypt plaintext using AES-256-GCM
- * @param plaintext - Text to encrypt
- * @returns Base64-encoded encrypted string (IV + auth tag + ciphertext)
- */
 export function encrypt(plaintext: string): string {
   const key = getKey();
   const iv = crypto.randomBytes(IV_LENGTH);
@@ -30,11 +21,6 @@ export function encrypt(plaintext: string): string {
   return Buffer.concat([iv, tag, encrypted]).toString("base64");
 }
 
-/**
- * Decrypt ciphertext using AES-256-GCM
- * @param ciphertext - Base64-encoded encrypted string
- * @returns Decrypted plaintext string
- */
 export function decrypt(ciphertext: string): string {
   const key = getKey();
   const data = Buffer.from(ciphertext, "base64");

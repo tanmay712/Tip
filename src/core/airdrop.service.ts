@@ -5,32 +5,15 @@ import { getOrCreateWallet } from "./wallet.service.js";
 import { LIMITS, TXN_TYPES } from "../utils/constants.js";
 import { logger } from "../utils/logger.js";
 
-/**
- * Result of creating an airdrop
- */
 export interface CreateAirdropResult {
   success: boolean;
   error?: string;
   airdropId?: string;
-  /** Total amount reserved for this airdrop (perClaim * maxClaims, remainder truncated) */
   totalAmount: string;
   perClaim: string;
   maxClaims: number;
 }
 
-/**
- * Create a first-come-first-served airdrop
- * @param creatorDiscordId - Discord ID of the airdrop creator
- * @param guildId - Discord guild ID where the airdrop is created
- * @param channelId - Discord channel ID where the airdrop is posted
- * @param totalAmount - Total amount to distribute in raw units
- * @param tokenSymbol - Token symbol (e.g., "ETH", "USDC")
- * @param chainId - Blockchain identifier (e.g., "ethereum", "polygon")
- * @param token - Token identifier ("native" or contract address)
- * @param maxClaims - Maximum number of users who can claim
- * @param isTestnet - Whether to use testnet or mainnet
- * @returns CreateAirdropResult with airdrop details
- */
 export async function createAirdrop(
   creatorDiscordId: string,
   guildId: string,
@@ -50,12 +33,7 @@ export async function createAirdrop(
   const perClaim = perClaimBigInt.toString();
 
   const creator = await userRepo.findOrCreateUser(creatorDiscordId);
-  const balance = await txRepo.getUserBalance(
-    creator.id,
-    chainId,
-    token,
-    isTestnet,
-  );
+  const balance = await txRepo.getUserBalance(creator.id, chainId, token, isTestnet);
 
   if (balance < reservedAmountBigInt) {
     return {
@@ -67,7 +45,6 @@ export async function createAirdrop(
     };
   }
 
-  // Reserve funds by creating a pending withdraw-like entry
   await txRepo.createTransaction({
     type: TXN_TYPES.AIRDROP,
     senderId: creator.id,
@@ -79,9 +56,7 @@ export async function createAirdrop(
     status: "completed",
   });
 
-  const expiresAt = new Date(
-    Date.now() + LIMITS.airdropExpiryMinutes * 60 * 1000,
-  );
+  const expiresAt = new Date(Date.now() + LIMITS.airdropExpiryMinutes * 60 * 1000);
 
   const airdrop = await airdropRepo.createAirdrop({
     creatorId: creator.id,
@@ -145,7 +120,6 @@ export async function claimAirdrop(
   await getOrCreateWallet(claimerDiscordId, airdrop.chain, isTestnet);
   await airdropRepo.claimAirdrop(airdropId, claimer.id);
 
-  // Credit the claimer
   await txRepo.createTransaction({
     type: TXN_TYPES.AIRDROP,
     receiverId: claimer.id,

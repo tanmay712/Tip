@@ -5,29 +5,17 @@ description: Deploy Hodlr with Docker, Railway, or manually
 
 ## Docker
 
-The fastest way to deploy Hodlr in production.
-
 ### docker-compose (recommended)
 
 ```bash
-# Create .env file
 cp .env.example .env
-# Edit .env with your values
+# Fill in .env
 
-# Start
 docker-compose up -d
-
-# View logs
 docker-compose logs -f hodlr
-
-# Stop
-docker-compose down
 ```
 
-The compose file includes:
-- Persistent SQLite storage via Docker volume
-- Health checks on `/health`
-- Auto-restart on failure
+The compose file mounts a persistent volume at `/app/data` for SQLite and runs health checks on `/health`.
 
 ### Dockerfile only
 
@@ -42,31 +30,24 @@ docker run -d \
   hodlr
 ```
 
+---
+
 ## Railway
 
-1. Push your code to GitHub
-2. Connect the repo to [Railway](https://railway.app)
-3. Add environment variables in the Railway dashboard:
+1. Push to GitHub and connect to [Railway](https://railway.app)
+2. Set environment variables:
    - `DISCORD_TOKEN`
    - `DISCORD_CLIENT_ID`
    - `ALCHEMY_API_KEY`
-   - `ENCRYPTION_SECRET`
-   - `DATABASE_URL` (Railway provides PostgreSQL add-on)
-4. Deploy — Railway auto-detects the `railway.toml` config
+   - `ENCRYPTION_SECRET` — generate: `openssl rand -hex 32`
+3. For persistence: add a Volume mounted at `/app/data` (SQLite), or add the **PostgreSQL** plugin and set `DATABASE_URL`
+4. Deploy — Railway uses `railway.toml` and the included `Dockerfile` automatically
 
-The included `railway.toml` runs migrations before starting:
+### Using PostgreSQL on Railway
 
-```toml
-[deploy]
-startCommand = "npx prisma migrate deploy && node dist/index.js"
-healthcheckPath = "/health"
-```
-
-### Railway with PostgreSQL
-
-1. Add a PostgreSQL plugin in Railway
-2. Copy the `DATABASE_URL` from the plugin to your service variables
-3. Update the Prisma schema provider if needed:
+1. Add the PostgreSQL plugin
+2. Railway injects `DATABASE_URL` automatically
+3. Update `prisma/schema.prisma`:
 
 ```prisma
 datasource db {
@@ -75,54 +56,48 @@ datasource db {
 }
 ```
 
-## Manual Deployment
+4. Run `npx prisma migrate deploy` in a Railway pre-deploy command
+
+---
+
+## Manual
 
 ```bash
-# Install dependencies
 npm ci
-
-# Build TypeScript
 npm run build
-
-# Run database migrations
 npx prisma migrate deploy
-
-# Register Discord commands (one-time)
 npm run deploy-commands
-
-# Start
 node dist/index.js
 ```
 
-### Process Manager (PM2)
+### PM2
 
 ```bash
-npm install -g pm2
+npm i -g pm2
 pm2 start dist/index.js --name hodlr
-pm2 save
-pm2 startup
+pm2 save && pm2 startup
 ```
 
-## Setting Up Alchemy Webhooks
+---
 
-For automatic deposit detection:
+## Deposit Detection
+
+Deposits are detected automatically via polling — no Alchemy webhook setup required. The bot queries `getAssetTransfers` for all registered wallet addresses every 60 seconds and credits any new inbound transactions.
+
+If you want real-time detection (sub-60s), you can optionally configure Alchemy webhooks:
 
 1. Go to [Alchemy Dashboard](https://dashboard.alchemy.com/) → Webhooks
-2. Create a new **Address Activity** webhook
-3. Set the webhook URL to: `https://your-domain.com/webhooks/alchemy`
-4. Add the Hodlr wallet addresses you want to monitor
-5. Copy the **Signing Key** and set it as `ALCHEMY_WEBHOOK_SIGNING_KEY` in your `.env`
+2. Create an **Address Activity** webhook pointing to `https://your-domain/webhooks/alchemy`
+3. Set `ALCHEMY_WEBHOOK_SIGNING_KEY` in your env
 
-Without webhooks, deposits can still be detected but will require manual checking.
+---
 
-## Health Check
-
-Verify your deployment:
+## Verify Deployment
 
 ```bash
 curl http://localhost:3000/health
-# {"status":"ok","timestamp":"...","uptime":123.45}
+# {"status":"ok","timestamp":"...","uptime":42.0}
 
 curl http://localhost:3000/stats
-# {"users":42,"wallets":336,"transactions":{"mainnet":100,"testnet":50,"total":150}}
+# {"users":5,"wallets":40,"transactions":{"mainnet":20,"testnet":5,"total":25}}
 ```

@@ -2,8 +2,7 @@ import { prisma } from "./client.js";
 import { logger } from "../utils/logger.js";
 
 async function main() {
-  logger.info("Database seed complete — no default data required");
-  logger.info("Users and wallets are created on-demand when they interact with the bot");
+  logger.info("Seed complete — users and wallets are created on-demand");
 }
 
 main()

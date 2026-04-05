@@ -10,9 +10,6 @@ import { getPrivateKey } from "./wallet.service.js";
 import { TXN_TYPES } from "../utils/constants.js";
 import { logger } from "../utils/logger.js";
 
-/**
- * Result of a withdrawal operation
- */
 export interface WithdrawResult {
   success: boolean;
   error?: string;
@@ -26,18 +23,6 @@ const ERC20_ABI = [
   "function transfer(address to, uint256 amount) returns (bool)",
 ];
 
-/**
- * Withdraw tokens to an external wallet address
- * @param discordId - Discord ID of the user
- * @param toAddress - Destination wallet address
- * @param amount - Amount to withdraw in raw units
- * @param tokenSymbol - Token symbol (e.g., "ETH", "USDC")
- * @param chainId - Blockchain identifier (e.g., "ethereum", "polygon")
- * @param token - Token identifier ("native" or contract address)
- * @param decimals - Token decimals for amount formatting
- * @param isTestnet - Whether to use testnet or mainnet
- * @returns WithdrawResult with transaction details
- */
 export async function withdraw(
   discordId: string,
   toAddress: string,
@@ -51,34 +36,16 @@ export async function withdraw(
   const chain = getChain(chainId);
   const user = await userRepo.findOrCreateUser(discordId);
 
-  // Check internal balance
-  const balance = await txRepo.getUserBalance(
-    user.id,
-    chainId,
-    token,
-    isTestnet,
-  );
+  const balance = await txRepo.getUserBalance(user.id, chainId, token, isTestnet);
   const amountBigInt = BigInt(amount);
 
   if (balance < amountBigInt) {
-    return {
-      success: false,
-      error: "Insufficient balance",
-      chain: chainId,
-      amount,
-      tokenSymbol,
-    };
+    return { success: false, error: "Insufficient balance", chain: chainId, amount, tokenSymbol };
   }
 
   const wallet = await walletRepo.getWallet(user.id, chainId, isTestnet);
   if (!wallet) {
-    return {
-      success: false,
-      error: "No wallet found for this chain",
-      chain: chainId,
-      amount,
-      tokenSymbol,
-    };
+    return { success: false, error: "No wallet found for this chain", chain: chainId, amount, tokenSymbol };
   }
 
   const pk = getPrivateKey(wallet.encryptedKey);
@@ -90,23 +57,14 @@ export async function withdraw(
       if (token === "native") {
         txHash = await transferSol(keypair, toAddress, amountBigInt, isTestnet);
       } else {
-        txHash = await transferSplToken(
-          keypair,
-          toAddress,
-          token,
-          amountBigInt,
-          isTestnet,
-        );
+        txHash = await transferSplToken(keypair, toAddress, token, amountBigInt, isTestnet);
       }
     } else {
       const provider = getEvmProvider(chainId, isTestnet);
       const signer = new ethers.Wallet(pk, provider);
 
       if (token === "native") {
-        const tx = await signer.sendTransaction({
-          to: toAddress,
-          value: amountBigInt,
-        });
+        const tx = await signer.sendTransaction({ to: toAddress, value: amountBigInt });
         txHash = tx.hash;
       } else {
         const contract = new ethers.Contract(token, ERC20_ABI, signer);
@@ -114,17 +72,9 @@ export async function withdraw(
         txHash = tx.hash;
       }
 
-      // Ensure the transaction actually got mined successfully before
-      // recording the withdrawal as completed.
       const receipt = await waitForTransaction(chainId, isTestnet, txHash, 1);
       if (!receipt || receipt.status !== 1) {
-        return {
-          success: false,
-          error: "Transaction reverted",
-          chain: chainId,
-          amount,
-          tokenSymbol,
-        };
+        return { success: false, error: "Transaction reverted", chain: chainId, amount, tokenSymbol };
       }
     }
   } catch (err) {
@@ -138,7 +88,6 @@ export async function withdraw(
     };
   }
 
-  // Record the withdrawal
   await txRepo.createTransaction({
     type: TXN_TYPES.WITHDRAW,
     senderId: user.id,
@@ -151,16 +100,7 @@ export async function withdraw(
     status: "completed",
   });
 
-  logger.info(
-    { discordId, chain: chainId, amount, txHash },
-    "Withdrawal completed",
-  );
+  logger.info({ discordId, chain: chainId, amount, txHash }, "Withdrawal completed");
 
-  return {
-    success: true,
-    txHash,
-    chain: chainId,
-    amount,
-    tokenSymbol,
-  };
+  return { success: true, txHash, chain: chainId, amount, tokenSymbol };
 }

@@ -6,7 +6,6 @@ import { handlePrefixCommand } from "../prefix/index.js";
 
 export function registerMessageHandler(client: Client): void {
   client.on("messageCreate", async (message: Message) => {
-    // Ignore bots and messages without the command prefix
     if (message.author.bot) return;
     if (!message.content.startsWith(PREFIX)) return;
 
@@ -22,9 +21,7 @@ export function registerMessageHandler(client: Client): void {
       await handlePrefixCommand(message);
     } catch (err) {
       logger.error({ err, user: message.author.id }, "Prefix command failed");
-      await message.reply(
-        `${EMOJIS.error} Something went wrong. Please try again later.`,
-      );
+      await message.reply(`${EMOJIS.error} Something went wrong. Please try again later.`);
     }
   });
 }

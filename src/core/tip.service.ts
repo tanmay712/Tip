@@ -5,9 +5,6 @@ import { getChain } from "../blockchain/chains.js";
 import { TXN_TYPES } from "../utils/constants.js";
 import { logger } from "../utils/logger.js";
 
-/**
- * Result of a tip operation
- */
 export interface TipResult {
   success: boolean;
   error?: string;
@@ -16,17 +13,6 @@ export interface TipResult {
   chain: string;
 }
 
-/**
- * Send an off-chain tip to another user
- * @param senderDiscordId - Discord ID of the sender
- * @param receiverDiscordId - Discord ID of the receiver
- * @param amount - Amount in raw units (wei for EVM, lamports for Solana)
- * @param tokenSymbol - Token symbol (e.g., "ETH", "USDC")
- * @param chainId - Blockchain identifier (e.g., "ethereum", "polygon")
- * @param token - Token identifier ("native" or contract address)
- * @param isTestnet - Whether to use testnet or mainnet
- * @returns TipResult indicating success or failure
- */
 export async function sendTip(
   senderDiscordId: string,
   receiverDiscordId: string,
@@ -36,22 +22,15 @@ export async function sendTip(
   token: string,
   isTestnet: boolean,
 ): Promise<TipResult> {
-  const chain = getChain(chainId);
+  getChain(chainId);
 
-  // Ensure both users have wallets
   await getOrCreateWallet(senderDiscordId, chainId, isTestnet);
   await getOrCreateWallet(receiverDiscordId, chainId, isTestnet);
 
   const sender = await userRepo.findOrCreateUser(senderDiscordId);
   const receiver = await userRepo.findOrCreateUser(receiverDiscordId);
 
-  // Check sender balance
-  const balance = await txRepo.getUserBalance(
-    sender.id,
-    chainId,
-    token,
-    isTestnet,
-  );
+  const balance = await txRepo.getUserBalance(sender.id, chainId, token, isTestnet);
   const amountBigInt = BigInt(amount);
 
   if (balance < amountBigInt) {
@@ -64,7 +43,6 @@ export async function sendTip(
     };
   }
 
-  // Create send transaction (debit sender)
   await txRepo.createTransaction({
     type: TXN_TYPES.TIP,
     senderId: sender.id,
@@ -82,10 +60,5 @@ export async function sendTip(
     "Tip sent",
   );
 
-  return {
-    success: true,
-    amount,
-    tokenSymbol,
-    chain: chainId,
-  };
+  return { success: true, amount, tokenSymbol, chain: chainId };
 }

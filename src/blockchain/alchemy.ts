@@ -75,11 +75,6 @@ export async function getAssetTransfers(
   return alchemy.core.getAssetTransfers(params as never);
 }
 
-/**
- * Validate that the configured Alchemy API key can reach the network.
- * Logs a warning on failure rather than throwing, so startup can continue
- * with a degraded-but-running bot (balance/withdraw commands will fail).
- */
 export async function validateAlchemyConnection(): Promise<void> {
   try {
     const alchemy = getAlchemy("ethereum", false);

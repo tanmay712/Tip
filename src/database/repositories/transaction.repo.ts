@@ -63,24 +63,12 @@ export async function getUserBalance(
   isTestnet: boolean,
 ): Promise<bigint> {
   const receivedTxns = await prisma.transaction.findMany({
-    where: {
-      receiverId: userId,
-      chain,
-      token,
-      isTestnet,
-      status: "completed",
-    },
+    where: { receiverId: userId, chain, token, isTestnet, status: "completed" },
     select: { amount: true },
   });
 
   const sentTxns = await prisma.transaction.findMany({
-    where: {
-      senderId: userId,
-      chain,
-      token,
-      isTestnet,
-      status: "completed",
-    },
+    where: { senderId: userId, chain, token, isTestnet, status: "completed" },
     select: { amount: true },
   });
 
@@ -92,15 +80,9 @@ export async function getUserBalance(
     (sum: bigint, t: { amount: string }) => sum + BigInt(t.amount),
     0n,
   );
-  return BigInt(totalReceived) - BigInt(totalSent);
+  return totalReceived - totalSent;
 }
 
-/**
- * Get leaderboard of top tippers ranked by transaction count
- * @param isTestnet - Whether to query testnet or mainnet transactions
- * @param limit - Maximum number of entries to return (default: 10)
- * @returns Array of leaderboard entries with user IDs, tip counts, and total amounts
- */
 export async function getLeaderboard(
   isTestnet: boolean,
   limit = 10,
@@ -118,13 +100,11 @@ export async function getLeaderboard(
     take: limit,
   });
 
-  // Calculate total amount for each user
   const entries: Array<{ userId: string; totalTips: number; totalAmount: string }> = [];
-  
+
   for (const result of results) {
     if (!result.senderId) continue;
-    
-    // Sum all sent amounts for this user
+
     const txns = await prisma.transaction.findMany({
       where: {
         senderId: result.senderId,
@@ -134,12 +114,12 @@ export async function getLeaderboard(
       },
       select: { amount: true },
     });
-    
+
     const totalAmount = txns.reduce(
       (sum: bigint, t: { amount: string }) => sum + BigInt(t.amount),
       0n,
     );
-    
+
     entries.push({
       userId: result.senderId,
       totalTips: result._count.id,

@@ -15,84 +15,62 @@ description: Set up Hodlr in your Discord server
 git clone https://github.com/HiLleywyn/hodlr.git
 cd hodlr
 npm install
+cp .env.example .env
 ```
 
 ## Configuration
 
-Copy the example environment file and fill in your values:
+Fill in `.env`:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DISCORD_TOKEN` | Yes | Bot token from Discord Developer Portal |
+| `DISCORD_CLIENT_ID` | Yes | Application Client ID |
+| `ALCHEMY_API_KEY` | Yes | Alchemy API key |
+| `ENCRYPTION_SECRET` | Yes | 32-byte hex for wallet encryption |
+
+Generate `ENCRYPTION_SECRET`:
 
 ```bash
-cp .env.example .env
+openssl rand -hex 32
 ```
 
-### Required Variables
-
-| Variable | Description |
-|----------|-------------|
-| `DISCORD_TOKEN` | Your bot token from the Discord Developer Portal |
-| `DISCORD_CLIENT_ID` | Your application's client ID |
-| `ALCHEMY_API_KEY` | API key from your Alchemy dashboard |
-| `ENCRYPTION_SECRET` | 32-byte hex string for wallet encryption |
-
-Generate an encryption secret:
+## Database
 
 ```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+npx prisma db push
 ```
 
-## Database Setup
+For PostgreSQL, set `DATABASE_URL` to your connection string and update `prisma/schema.prisma` to use `provider = "postgresql"`.
 
-Hodlr uses Prisma ORM. By default, it uses SQLite for zero-config setup.
-
-```bash
-npx prisma migrate dev --name init
-```
-
-For production with PostgreSQL, update `DATABASE_URL` in your `.env`:
-
-```
-DATABASE_URL=postgresql://user:pass@localhost:5432/hodlr
-```
-
-## Register Commands
-
-Register slash commands with Discord:
+## Register Slash Commands
 
 ```bash
 npm run deploy-commands
 ```
 
-For development, set `DISCORD_GUILD_ID` in `.env` to register commands instantly to a specific server instead of waiting for global propagation.
+Set `DISCORD_GUILD_ID` in `.env` during development to register commands instantly to one server instead of waiting for global propagation (~1 hour).
 
-## Start the Bot
+## Start
 
 ```bash
-# Development (hot reload)
-npm run dev
-
-# Production
-npm run build
-npm start
+npm run dev    # development, hot reload
+npm run build && npm start  # production
 ```
 
 ## Invite the Bot
-
-Use this URL template (replace `CLIENT_ID` with your application's client ID):
 
 ```
 https://discord.com/api/oauth2/authorize?client_id=CLIENT_ID&permissions=277025770560&scope=bot%20applications.commands
 ```
 
-Required permissions:
-- Send Messages
-- Embed Links
-- Use Slash Commands
-- Read Message History
-- Add Reactions
+Required permissions: Send Messages, Embed Links, Use Slash Commands, Read Message History.
 
 ## First Steps
 
-1. Run `/network testnet` to switch to testnet mode
-2. Run `/wallet deposit ethereum` to get your deposit address
-3. Fund your testnet wallet using a [Sepolia faucet](https://sepoliafaucet.com/)
-4. Try `/tip @friend 0.001 ETH` to send your first tip!
+1. Switch to testnet: `/network testnet` or `$network testnet`
+2. Get a deposit address: `/wallet deposit chain:ethereum`
+3. Fund it from a [Sepolia faucet](https://sepoliafaucet.com/)
+4. Wait up to 60 seconds for the deposit poller to pick it up
+5. Check your balance: `/balance chain:ethereum`
+6. Send a tip: `/tip @friend 0.001 ETH`

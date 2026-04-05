@@ -2,22 +2,21 @@ import { connectDatabase } from "./database/client.js";
 import { startBot } from "./bot/client.js";
 import { startApiServer } from "./api/server.js";
 import { validateAlchemyConnection } from "./blockchain/alchemy.js";
+import { startDepositPoller } from "./core/deposit.service.js";
 import { logger } from "./utils/logger.js";
 
 async function main(): Promise<void> {
   logger.info("Starting Hodlr...");
 
-  // Connect database
   await connectDatabase();
   logger.info("Database connected");
 
-  // Validate Alchemy API connection before serving any blockchain commands
   await validateAlchemyConnection();
 
-  // Start API server (webhooks, health, stats)
   await startApiServer();
 
-  // Start Discord bot
+  startDepositPoller();
+
   await startBot();
 
   logger.info("Hodlr is fully operational");
@@ -28,7 +27,6 @@ main().catch((err) => {
   process.exit(1);
 });
 
-// Graceful shutdown
 process.on("SIGINT", () => {
   logger.info("Shutting down...");
   process.exit(0);
