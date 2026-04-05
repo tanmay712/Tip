@@ -133,3 +133,37 @@ export async function getLeaderboard(
 export async function getTransactionCount(isTestnet: boolean): Promise<number> {
   return prisma.transaction.count({ where: { isTestnet } });
 }
+
+/** Full leaderboard data for USD conversion, optionally filtered by token symbol. */
+export async function getLeaderboardFull(
+  isTestnet: boolean,
+  tokenSymbol: string | null,
+  limit = 50,
+): Promise<Array<{ userId: string; totalTips: number; txns: Array<{ amount: string; tokenSymbol: string }> }>> {
+  const baseWhere = {
+    type: { in: ["tip", "rain", "airdrop"] as string[] },
+    isTestnet,
+    senderId: { not: null },
+    status: "completed",
+    ...(tokenSymbol ? { tokenSymbol: tokenSymbol.toUpperCase() } : {}),
+  };
+
+  const grouped = await prisma.transaction.groupBy({
+    by: ["senderId"],
+    where: baseWhere,
+    _count: { id: true },
+    orderBy: { _count: { id: "desc" } },
+    take: limit,
+  });
+
+  const entries = [];
+  for (const g of grouped) {
+    if (!g.senderId) continue;
+    const txns = await prisma.transaction.findMany({
+      where: { ...baseWhere, senderId: g.senderId },
+      select: { amount: true, tokenSymbol: true },
+    });
+    entries.push({ userId: g.senderId, totalTips: g._count.id, txns });
+  }
+  return entries;
+}

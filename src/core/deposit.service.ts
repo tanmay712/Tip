@@ -1,7 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
 import * as walletRepo from "../database/repositories/wallet.repo.js";
 import * as txRepo from "../database/repositories/transaction.repo.js";
-import * as userRepo from "../database/repositories/user.repo.js";
+import { prisma } from "../database/client.js";
 import { getChain, CHAIN_IDS, getExplorerTxUrl } from "../blockchain/chains.js";
 import { getAlchemy } from "../blockchain/alchemy.js";
 import { getSolanaConnection } from "../blockchain/solana.js";
@@ -15,7 +15,7 @@ import { brandEmbed } from "../bot/components/embeds.js";
 const lastProcessedBlock = new Map<string, string>();
 
 async function notifyDeposit(params: {
-  userId: string;          // Prisma User.id
+  userId: string;
   chainId: string;
   tokenSymbol: string;
   rawAmount: string;
@@ -23,36 +23,30 @@ async function notifyDeposit(params: {
   txHash: string;
   isTestnet: boolean;
 }): Promise<void> {
+  const prismaUser = await prisma.user.findUnique({
+    where: { id: params.userId },
+    select: { discordId: true },
+  });
+  if (!prismaUser) return;
+
   const chain = getChain(params.chainId);
   const formatted = formatTokenAmount(params.rawAmount, params.decimals);
   const txUrl = getExplorerTxUrl(params.chainId, params.txHash, params.isTestnet);
   const networkLabel = params.isTestnet ? "🟡 Testnet" : "🟢 Mainnet";
 
-  // Look up the user's Discord ID from Prisma user ID
-  const user = await userRepo.getUser(""); // placeholder — we use a direct lookup below
-  void user; // suppress unused warning
-
-  // Find the wallet to get discordId via user relation
-  // The userId here is the Prisma User.id, not discordId
-  // We need to find it from the prisma User model
-  const prismaUser = await import("../database/client.js").then((m) =>
-    m.prisma.user.findUnique({ where: { id: params.userId }, select: { discordId: true } }),
-  );
-  if (!prismaUser) return;
-
   const embed = brandEmbed()
     .setColor(0x00ff88)
-    .setTitle("📥 Deposit Confirmed!")
+    .setTitle("📥 Deposit Confirmed")
     .setDescription(
-      `Your deposit of **${formatted} ${params.tokenSymbol}** on **${chain.emoji} ${chain.name}** has been credited to your balance.`,
+      `Your deposit landed on ${chain.emoji} **${chain.name}**. Your balance has been updated.`,
     )
     .addFields(
-      { name: "Amount", value: `**${formatted} ${params.tokenSymbol}**`, inline: true },
-      { name: "Chain", value: `${chain.emoji} ${chain.name}`, inline: true },
-      { name: "Network", value: networkLabel, inline: true },
-      { name: "Transaction", value: `[View on Explorer](${txUrl})`, inline: false },
+      { name: "💰 Amount", value: `\`${formatted} ${params.tokenSymbol}\``, inline: true },
+      { name: "⛓️ Chain", value: `${chain.emoji} ${chain.name}`, inline: true },
+      { name: "🌐 Network", value: networkLabel, inline: true },
+      { name: "🔗 Transaction", value: `[View on Explorer](${txUrl})`, inline: false },
     )
-    .setFooter({ text: "Hodlr — Tip crypto. Instantly." });
+    .setFooter({ text: "Hodlr" });
 
   await dmUser(prismaUser.discordId, [embed]);
 }

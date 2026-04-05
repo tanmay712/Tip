@@ -11,8 +11,8 @@ import { handleAdminCommand } from "./admin.js";
 import { getOrCreateWallet, getAllWallets } from "../../core/wallet.service.js";
 import { sendTip } from "../../core/tip.service.js";
 import { sendRain } from "../../core/rain.service.js";
-import { getLeaderboard } from "../../core/leaderboard.service.js";
-import { getPrice } from "../../core/price.service.js";
+import { getLeaderboard, getLeaderboardUSD, getLeaderboardTips } from "../../core/leaderboard.service.js";
+import { getPrice, getPrices } from "../../core/price.service.js";
 import { withdraw } from "../../core/withdraw.service.js";
 import { createAirdrop, claimAirdrop } from "../../core/airdrop.service.js";
 import * as alchemyApi from "../../blockchain/alchemy.js";
@@ -30,7 +30,14 @@ import {
   withdrawEmbed,
   depositEmbed,
 } from "../components/embeds.js";
-import { airdropClaimButton } from "../components/buttons.js";
+import {
+  airdropClaimButton,
+  tipActionRow,
+  depositActionRow,
+  withdrawActionRow,
+  hodlrMenuRow1,
+  hodlrMenuRow2,
+} from "../components/buttons.js";
 import { BRAND, EMOJIS, PREFIX, LIMITS } from "../../utils/constants.js";
 
 const MEDALS = ["🥇", "🥈", "🥉"];
@@ -38,67 +45,68 @@ const MEDALS = ["🥇", "🥈", "🥉"];
 const COMMAND_HELP: Record<string, { usage: string; description: string }> = {
   tip: {
     usage: `${PREFIX}tip @user <amount> <token> [chain]`,
-    description: "Send an instant off-chain tip. Example: `$tip @alice 0.01 ETH`",
+    description: "Send an instant off-chain tip. Example: `$tip @alice 0.01 ETH ethereum`",
   },
   rain: {
     usage: `${PREFIX}rain <amount> <token> [chain]`,
-    description: "Distribute tokens evenly among active members.",
+    description: "Split tokens evenly across active server members.",
   },
   airdrop: {
     usage: `${PREFIX}airdrop <amount> <token> <slots> [chain]`,
-    description: "Create a claimable airdrop. Example: `$airdrop 1 ETH 10`",
+    description: "Drop tokens for the first N people to claim. Example: `$airdrop 1 ETH 10`",
   },
   balance: {
     usage: `${PREFIX}balance [chain]`,
-    description: "Check balances. Specify a chain for on-chain detail.",
+    description: "Check your balance. Add a chain name for on-chain detail.",
   },
   wallet: {
-    usage: `${PREFIX}wallet [deposit <chain>|withdraw <chain> <address> <amount> <token>]`,
+    usage: `${PREFIX}wallet [deposit <chain> | withdraw <chain> <address> <amount> <token>]`,
     description: "View wallets, get a deposit address, or withdraw funds.",
   },
   deposit: {
     usage: `${PREFIX}deposit <chain>`,
-    description: "Alias for `$wallet deposit`. Get your deposit address.",
+    description: "Get your deposit address for a chain.",
   },
   withdraw: {
     usage: `${PREFIX}withdraw <chain> <address> <amount> <token>`,
-    description: "Alias for `$wallet withdraw`. Withdraw tokens to an external address.",
+    description: "Withdraw tokens to an external wallet address.",
   },
   network: {
     usage: `${PREFIX}network [mainnet|testnet]`,
-    description: "View or switch your network setting.",
+    description: "View or switch your active network.",
   },
   price: {
     usage: `${PREFIX}price <token>`,
-    description: "Check the current USD price and 24h change.",
+    description: "Get the current USD price and 24h change for a token.",
   },
   leaderboard: {
-    usage: `${PREFIX}leaderboard [limit]`,
-    description: "See the top tippers.",
+    usage: `${PREFIX}leaderboard [token] [tips]`,
+    description:
+      "Top tippers sorted by USD sent. Filter by token (e.g. `eth`) or switch to count mode with `tips`.",
+  },
+  config: {
+    usage: `${PREFIX}config`,
+    description: "View your current settings.",
+  },
+  hodlr: {
+    usage: `${PREFIX}hodlr`,
+    description: "Bot overview, stats, and quick-action buttons.",
   },
 };
 
-/** Reply either in-channel or via DM depending on context. */
-async function safeReply(message: Message, options: Parameters<Message["reply"]>[0]) {
-  return message.reply(options);
-}
-
 /**
  * For sensitive commands (withdraw/deposit): if in a guild channel, redirect to DMs.
- * Returns true if we should continue in DMs, false if already in DMs.
+ * Returns true if redirected to DMs, false if already in a DM.
  */
 async function redirectToDm(message: Message): Promise<boolean> {
-  if (!message.guild) return false; // already in DMs
+  if (!message.guild) return false;
   try {
     await message.reply({
       embeds: [
         brandEmbed()
           .setColor(0xf5a623)
-          .setTitle(`${EMOJIS.wallet} Privacy First — Check Your DMs`)
-          .setDescription(
-            "For your security, sensitive wallet operations are handled privately.\n" +
-              "I've sent you a DM to continue.",
-          ),
+          .setTitle(`${EMOJIS.wallet} Sent to DMs`)
+          .setDescription("Wallet operations are handled privately. Check your DMs."),
       ],
     });
   } catch {
@@ -117,12 +125,14 @@ export async function handlePrefixCommand(message: Message): Promise<void> {
 
   // Check if user is banned (skip admin commands so admins can unban)
   if (cmd !== "admin") {
-    const banned = await configRepo.isUserBanned(message.author.id);
-    if (banned) {
-      await message.reply({
-        embeds: [errorEmbed("You have been banned from using Hodlr.")],
-      });
-      return;
+    try {
+      const banned = await configRepo.isUserBanned(message.author.id);
+      if (banned) {
+        await message.reply({ embeds: [errorEmbed("You have been banned from using Hodlr.")] });
+        return;
+      }
+    } catch {
+      // DB table may not exist yet — ignore and continue
     }
   }
 
@@ -139,6 +149,9 @@ export async function handlePrefixCommand(message: Message): Promise<void> {
     // top-level aliases
     case "withdraw":    return handleWithdrawAlias(message, args);
     case "deposit":     return handleDepositAlias(message, args);
+    // extras
+    case "hodlr":       return handleHodlr(message);
+    case "config":      return handleConfig(message);
     // admin
     case "admin":       return handleAdminCommand(message, args);
     default:
@@ -182,10 +195,9 @@ async function handleHelp(message: Message, args: string[]): Promise<void> {
   await message.reply({
     embeds: [
       brandEmbed()
-        .setTitle(`${BRAND.name} — ${BRAND.tagline}`)
+        .setTitle(`${BRAND.name}`)
         .setDescription(
-          `Use \`${PREFIX}<command>\` or slash commands.\n` +
-            `Run \`${PREFIX}help <command>\` for detailed usage.`,
+          `Prefix: \`${PREFIX}\` or use slash commands\nRun \`${PREFIX}help <command>\` for details`,
         )
         .addFields(
           {
@@ -195,21 +207,20 @@ async function handleHelp(message: Message, args: string[]): Promise<void> {
           },
           {
             name: `${EMOJIS.wallet} Wallet`,
-            value:
-              `\`${PREFIX}wallet\`  \`${PREFIX}deposit\`  \`${PREFIX}withdraw\`  \`${PREFIX}balance\``,
+            value: `\`${PREFIX}deposit\`  \`${PREFIX}withdraw\`  \`${PREFIX}balance\`  \`${PREFIX}wallet\``,
             inline: false,
           },
           {
             name: `${EMOJIS.history} Info`,
-            value: `\`${PREFIX}leaderboard\`  \`${PREFIX}price\``,
+            value: `\`${PREFIX}leaderboard\`  \`${PREFIX}price\`  \`${PREFIX}hodlr\``,
             inline: false,
           },
           {
-            name: `${EMOJIS.network} Settings`,
-            value: `\`${PREFIX}network\`  \`${PREFIX}help\``,
+            name: `⚙️ Settings`,
+            value: `\`${PREFIX}network\`  \`${PREFIX}config\``,
             inline: false,
           },
-          { name: "Supported Chains", value: chainList, inline: false },
+          { name: "Chains", value: chainList, inline: false },
         ),
     ],
   });
@@ -305,6 +316,7 @@ async function handleTip(message: Message, args: string[]): Promise<void> {
         isTestnet,
       }),
     ],
+    components: [tipActionRow()],
   });
 
   try {
@@ -318,11 +330,12 @@ async function handleTip(message: Message, args: string[]): Promise<void> {
           tokenSymbol,
           chainId,
           isTestnet,
-        }).setFooter({ text: `Use ${PREFIX}balance to check your balance · Hodlr` }),
+        }).setFooter({ text: `Check your balance with ${PREFIX}balance · Hodlr` }),
       ],
+      components: [tipActionRow()],
     });
   } catch {
-    // DMs disabled — silently ignore
+    // DMs disabled
   }
 }
 
@@ -571,9 +584,11 @@ async function handleDepositFlow(message: Message, args: string[]): Promise<void
   const embed = depositEmbed({ chain: chainId, address, isTestnet });
 
   if (shouldRedirect) {
-    await message.author.send({ embeds: [embed] }).catch(() => {});
+    await message.author
+      .send({ embeds: [embed], components: [depositActionRow()] })
+      .catch(() => {});
   } else {
-    await message.reply({ embeds: [embed] });
+    await message.reply({ embeds: [embed], components: [depositActionRow()] });
   }
 }
 
@@ -713,9 +728,11 @@ async function handleWithdrawFlow(message: Message, args: string[]): Promise<voi
   });
 
   if (shouldRedirect) {
-    await message.author.send({ embeds: [resultEmbed] }).catch(() => {});
+    await message.author
+      .send({ embeds: [resultEmbed], components: [withdrawActionRow()] })
+      .catch(() => {});
   } else {
-    await message.reply({ embeds: [resultEmbed] });
+    await message.reply({ embeds: [resultEmbed], components: [withdrawActionRow()] });
   }
 }
 
@@ -827,7 +844,19 @@ async function handleRain(message: Message, args: string[]): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function handleAirdrop(message: Message, args: string[]): Promise<void> {
-  const [amountStr, tokenRaw, slotsStr, chainArg] = args;
+  const amountStr = args[0];
+  const tokenRaw = args[1];
+  // Smart parse: detect which of args[2]/args[3] is slots (number) vs chain (string)
+  let slotsStr: string | undefined;
+  let chainArg: string | undefined;
+  if (args.length >= 4) {
+    const thirdIsNum = !isNaN(parseInt(args[2], 10));
+    slotsStr = thirdIsNum ? args[2] : args[3];
+    chainArg = thirdIsNum ? args[3] : args[2];
+  } else {
+    slotsStr = args[2];
+    chainArg = undefined;
+  }
 
   if (!amountStr || !tokenRaw || !slotsStr) {
     await message.reply({ embeds: [errorEmbed(`Usage: \`${COMMAND_HELP.airdrop.usage}\``)] });
@@ -999,16 +1028,37 @@ async function handleAirdrop(message: Message, args: string[]): Promise<void> {
 async function handleLeaderboard(message: Message, args: string[]): Promise<void> {
   const network = await userRepo.getUserNetwork(message.author.id);
   const isTestnet = network === "testnet";
-  const limit = Math.min(Math.max(parseInt(args[0] || "10", 10) || 10, 1), 25);
 
-  const entries = await getLeaderboard(isTestnet, limit);
+  // Parse args: optional token symbol, optional "tips" mode
+  // e.g. $leaderboard | $leaderboard tips | $leaderboard eth | $leaderboard eth tips
+  const KNOWN_TOKENS = new Set(["ETH", "SOL", "AVAX", "POL", "MATIC", "ARB", "OP", "USDC", "USDT", "DAI", "LINK", "WETH", "BTC"]);
+  let tokenFilter: string | null = null;
+  let tipsMode = false;
+  let limit = 10;
+
+  for (const arg of args) {
+    const upper = arg.toUpperCase();
+    if (upper === "TIPS") { tipsMode = true; continue; }
+    if (KNOWN_TOKENS.has(upper)) { tokenFilter = upper; continue; }
+    const parsed = parseInt(arg, 10);
+    if (!isNaN(parsed) && parsed > 0) { limit = Math.min(parsed, 25); continue; }
+  }
+
+  const entries = tipsMode
+    ? await getLeaderboardTips(isTestnet, tokenFilter, limit)
+    : await getLeaderboardUSD(isTestnet, tokenFilter, limit);
+
+  const networkLabel = isTestnet ? `${EMOJIS.testnet} Testnet` : `${EMOJIS.mainnet} Mainnet`;
+  const filterLabel = tokenFilter ? `${tokenFilter} only` : "all tokens";
+  const modeLabel = tipsMode ? "tip count" : "USD sent";
+  const subtitle = `${networkLabel} · ${filterLabel} · sorted by ${modeLabel}`;
 
   if (entries.length === 0) {
     await message.reply({
       embeds: [
         brandEmbed()
           .setTitle(`${EMOJIS.leaderboard} Leaderboard`)
-          .setDescription("No tips recorded yet. Be the first!"),
+          .setDescription(`No tips recorded yet.\n${subtitle}`),
       ],
     });
     return;
@@ -1016,7 +1066,10 @@ async function handleLeaderboard(message: Message, args: string[]): Promise<void
 
   const lines = entries.map((e) => {
     const medal = MEDALS[e.rank - 1] || `**#${e.rank}**`;
-    return `${medal} <@${e.discordId}> — **${e.totalTips}** tips sent`;
+    if (tipsMode) {
+      return `${medal} <@${e.discordId}>  **${e.totalTips}** tips  *(${e.totalAmount})*`;
+    }
+    return `${medal} <@${e.discordId}>  **${e.totalAmount}**  *(${e.totalTips} tips)*`;
   });
 
   await message.reply({
@@ -1024,11 +1077,80 @@ async function handleLeaderboard(message: Message, args: string[]): Promise<void
       brandEmbed()
         .setTitle(`${EMOJIS.leaderboard} Top Tippers`)
         .setDescription(lines.join("\n"))
-        .setFooter({
-          text: isTestnet
-            ? `${EMOJIS.testnet} Testnet · Hodlr`
-            : `${EMOJIS.mainnet} Mainnet · Hodlr`,
-        }),
+        .setFooter({ text: subtitle }),
     ],
   });
+}
+
+// ---------------------------------------------------------------------------
+// HODLR overview
+// ---------------------------------------------------------------------------
+
+async function handleHodlr(message: Message): Promise<void> {
+  const network = await userRepo.getUserNetwork(message.author.id);
+  const isTestnet = network === "testnet";
+  const networkLabel = isTestnet ? `${EMOJIS.testnet} Testnet` : `${EMOJIS.mainnet} Mainnet`;
+
+  // Fetch stats
+  const { prisma } = await import("../../database/client.js");
+  const [userCount, walletCount, mainnetTxns, testnetTxns] = await Promise.all([
+    prisma.user.count(),
+    prisma.wallet.count(),
+    prisma.transaction.count({ where: { isTestnet: false, status: "completed" } }),
+    prisma.transaction.count({ where: { isTestnet: true, status: "completed" } }),
+  ]);
+
+  await message.reply({
+    embeds: [
+      brandEmbed()
+        .setTitle(`${BRAND.name}`)
+        .setDescription(
+          `Instant crypto tipping across 8 chains.\n\n` +
+            `**Your network:** ${networkLabel}\n` +
+            `Type \`${PREFIX}network mainnet\` or \`${PREFIX}network testnet\` to switch.`,
+        )
+        .addFields(
+          { name: "👥 Users", value: `**${userCount.toLocaleString()}**`, inline: true },
+          { name: "👛 Wallets", value: `**${walletCount.toLocaleString()}**`, inline: true },
+          { name: "📦 Transactions", value: `**${(mainnetTxns + testnetTxns).toLocaleString()}**`, inline: true },
+          {
+            name: "Chains",
+            value: "ETH · Polygon · Arbitrum · Optimism · Base · zkSync · Avalanche · Solana",
+            inline: false,
+          },
+        )
+        .setFooter({ text: `${BRAND.name} · Use ${PREFIX}help for all commands` }),
+    ],
+    components: [hodlrMenuRow1(), hodlrMenuRow2()],
+  });
+}
+
+// ---------------------------------------------------------------------------
+// CONFIG overview
+// ---------------------------------------------------------------------------
+
+async function handleConfig(message: Message): Promise<void> {
+  const network = await userRepo.getUserNetwork(message.author.id);
+  const isTestnet = network === "testnet";
+  const networkLabel = isTestnet ? `${EMOJIS.testnet} Testnet` : `${EMOJIS.mainnet} Mainnet`;
+
+  const user = await userRepo.findOrCreateUser(message.author.id);
+
+  await message.reply({
+    embeds: [
+      brandEmbed()
+        .setTitle(`⚙️ Your Settings`)
+        .addFields(
+          { name: "Network", value: networkLabel, inline: true },
+          { name: "User ID", value: `\`${message.author.id}\``, inline: true },
+          {
+            name: "Switch Network",
+            value: `\`${PREFIX}network mainnet\` or \`${PREFIX}network testnet\``,
+            inline: false,
+          },
+        )
+        .setFooter({ text: `Hodlr` }),
+    ],
+  });
+  void user;
 }

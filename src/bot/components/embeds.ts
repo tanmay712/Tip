@@ -11,7 +11,7 @@ export function brandEmbed(): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(BRAND.color)
     .setAuthor({ name: BRAND.name, iconURL: BRAND.icon })
-    .setFooter({ text: `${BRAND.name} — ${BRAND.tagline}` })
+    .setFooter({ text: `${BRAND.name}` })
     .setTimestamp();
 }
 
@@ -42,18 +42,14 @@ export function tipEmbed(params: {
   const networkLabel = params.isTestnet ? `${EMOJIS.testnet} Testnet` : `${EMOJIS.mainnet} Mainnet`;
 
   return chainEmbed(params.chainId)
-    .setTitle(`${EMOJIS.tip} Tip Sent!`)
+    .setTitle(`${EMOJIS.tip} Tip Sent`)
     .setDescription(
-      `> **${params.senderTag}** tipped **${params.receiverTag}** **${formatted} ${params.tokenSymbol}** on ${chain.emoji} ${chain.name}`,
+      `**${params.senderTag}** tipped **${params.receiverTag}** **${formatted} ${params.tokenSymbol}**`,
     )
     .addFields(
-      {
-        name: "💰 Amount",
-        value: `\`${formatted} ${params.tokenSymbol}\``,
-        inline: true,
-      },
-      { name: "⛓️ Chain", value: `${chain.emoji} ${chain.name}`, inline: true },
-      { name: "🌐 Network", value: networkLabel, inline: true },
+      { name: "Amount", value: `\`${formatted} ${params.tokenSymbol}\``, inline: true },
+      { name: "Chain", value: `${chain.emoji} ${chain.name}`, inline: true },
+      { name: "Network", value: networkLabel, inline: true },
     );
 }
 
@@ -77,24 +73,16 @@ export function rainEmbed(params: {
   const networkLabel = params.isTestnet ? `${EMOJIS.testnet} Testnet` : `${EMOJIS.mainnet} Mainnet`;
 
   return chainEmbed(params.chainId)
-    .setTitle(`${EMOJIS.rain} It's Raining ${params.tokenSymbol}!`)
+    .setTitle(`${EMOJIS.rain} Rain`)
     .setDescription(
-      `> **${params.senderTag}** made it rain **${total} ${params.tokenSymbol}** on **${params.recipients}** lucky members!`,
+      `**${params.senderTag}** sent **${total} ${params.tokenSymbol}** to **${params.recipients}** members`,
     )
     .addFields(
-      {
-        name: "💰 Total",
-        value: `\`${total} ${params.tokenSymbol}\``,
-        inline: true,
-      },
-      {
-        name: "👤 Per User",
-        value: `\`${perUser} ${params.tokenSymbol}\``,
-        inline: true,
-      },
-      { name: "👥 Recipients", value: `**${params.recipients}**`, inline: true },
-      { name: "⛓️ Chain", value: `${chain.emoji} ${chain.name}`, inline: true },
-      { name: "🌐 Network", value: networkLabel, inline: true },
+      { name: "Total", value: `\`${total} ${params.tokenSymbol}\``, inline: true },
+      { name: "Per User", value: `\`${perUser} ${params.tokenSymbol}\``, inline: true },
+      { name: "Recipients", value: `**${params.recipients}**`, inline: true },
+      { name: "Chain", value: `${chain.emoji} ${chain.name}`, inline: true },
+      { name: "Network", value: networkLabel, inline: true },
     );
 }
 
@@ -122,36 +110,27 @@ export function airdropEmbed(params: {
   const progress = buildProgressBar(params.currentClaims, params.maxClaims);
 
   return chainEmbed(params.chainId)
-    .setTitle(`${EMOJIS.airdrop} Airdrop — ${total} ${params.tokenSymbol}!`)
+    .setTitle(`${EMOJIS.airdrop} Airdrop`)
     .setDescription(
-      `> **${params.creatorTag}** started an airdrop!\n` +
-        `> Click the button below to claim your share.\n\n` +
-        `${progress}  **${remaining}/${params.maxClaims}** slots remaining`,
+      `**${params.creatorTag}** dropped **${total} ${params.tokenSymbol}** — first come, first served\n\n` +
+        `${progress}  **${remaining}/${params.maxClaims}** slots left`,
     )
     .addFields(
-      {
-        name: "🎁 Per Claim",
-        value: `\`${perClaim} ${params.tokenSymbol}\``,
-        inline: true,
-      },
-      {
-        name: "⏰ Expires",
-        value: `<t:${Math.floor(params.expiresAt.getTime() / 1000)}:R>`,
-        inline: true,
-      },
-      { name: "⛓️ Chain", value: `${chain.emoji} ${chain.name}`, inline: true },
-      { name: "🌐 Network", value: networkLabel, inline: true },
+      { name: "Per Claim", value: `\`${perClaim} ${params.tokenSymbol}\``, inline: true },
+      { name: "Expires", value: `<t:${Math.floor(params.expiresAt.getTime() / 1000)}:R>`, inline: true },
+      { name: "Chain", value: `${chain.emoji} ${chain.name}`, inline: true },
+      { name: "Network", value: networkLabel, inline: true },
     );
 }
 
-function buildProgressBar(current: number, max: number, length = 10): string {
+function buildProgressBar(current: number, max: number, length = 12): string {
   const filled = Math.round((current / max) * length);
   const empty = length - filled;
-  return `${"▓".repeat(filled)}${"░".repeat(empty)}`;
+  return `\`${"▓".repeat(filled)}${"░".repeat(empty)}\``;
 }
 
 // ---------------------------------------------------------------------------
-// Wallet / Deposit embed
+// Wallet embed
 // ---------------------------------------------------------------------------
 
 export function walletEmbed(params: {
@@ -165,15 +144,16 @@ export function walletEmbed(params: {
 
   return chainEmbed(params.chain)
     .setTitle(`${EMOJIS.wallet} ${chain.name} Wallet`)
-    .setDescription(
-      `Send **${chain.nativeToken}** or any supported token to this address to deposit.`,
-    )
     .addFields(
-      { name: "📬 Address", value: `\`\`\`\n${params.address}\n\`\`\``, inline: false },
-      { name: "🌐 Network", value: networkLabel, inline: true },
-      { name: "🔍 Explorer", value: `[View on Explorer](${explorerUrl})`, inline: true },
+      { name: "Address", value: `\`\`\`\n${params.address}\n\`\`\``, inline: false },
+      { name: "Network", value: networkLabel, inline: true },
+      { name: "Explorer", value: `[View on Explorer](${explorerUrl})`, inline: true },
     );
 }
+
+// ---------------------------------------------------------------------------
+// Deposit embed
+// ---------------------------------------------------------------------------
 
 export function depositEmbed(params: {
   chain: string;
@@ -185,18 +165,16 @@ export function depositEmbed(params: {
   const networkLabel = params.isTestnet ? `${EMOJIS.testnet} Testnet` : `${EMOJIS.mainnet} Mainnet`;
 
   return chainEmbed(params.chain)
-    .setTitle(`${EMOJIS.deposit} Deposit Address — ${chain.name}`)
+    .setTitle(`${EMOJIS.deposit} Deposit`)
     .setDescription(
-      `Send **${chain.nativeToken}** or any supported token to the address below.\n` +
-        `Your balance will be credited automatically once the transaction is confirmed.`,
+      `Send **${chain.nativeToken}** or any supported token to this address. Your balance updates once confirmed.`,
     )
     .addFields(
-      { name: "📬 Deposit Address", value: `\`\`\`\n${params.address}\n\`\`\``, inline: false },
-      { name: "🌐 Network", value: networkLabel, inline: true },
-      { name: "⛓️ Chain", value: `${chain.emoji} ${chain.name}`, inline: true },
-      { name: "🔍 Explorer", value: `[View on Explorer](${explorerUrl})`, inline: false },
+      { name: `${chain.emoji} ${chain.name} Address`, value: `\`\`\`\n${params.address}\n\`\`\``, inline: false },
+      { name: "Network", value: networkLabel, inline: true },
+      { name: "Explorer", value: `[View on Explorer](${explorerUrl})`, inline: true },
     )
-    .setFooter({ text: `Deposits are detected automatically · ${BRAND.name}` });
+    .setFooter({ text: `Only send ${chain.name} assets to this address · ${BRAND.name}` });
 }
 
 // ---------------------------------------------------------------------------
@@ -213,20 +191,15 @@ export function balanceEmbed(params: {
 
   const embed = chainEmbed(params.chainId)
     .setTitle(`${chain.emoji} ${chain.name} Balance`)
-    .addFields({ name: "🌐 Network", value: networkLabel, inline: true });
+    .addFields({ name: "Network", value: networkLabel, inline: true });
 
   if (params.balances.length === 0) {
-    embed.addFields({
-      name: "No balances found",
-      value: "Deposit some crypto to get started!",
-      inline: false,
-    });
+    embed.addFields({ name: "Empty", value: "No balances on this chain yet.", inline: false });
   } else {
     for (const b of params.balances) {
-      const formatted = formatTokenAmount(b.amount, b.decimals);
       embed.addFields({
-        name: `💰 ${b.symbol}`,
-        value: `\`${formatted}\``,
+        name: b.symbol,
+        value: `\`${formatTokenAmount(b.amount, b.decimals)}\``,
         inline: true,
       });
     }
@@ -254,43 +227,30 @@ export function withdrawEmbed(params: {
   const networkLabel = params.isTestnet ? `${EMOJIS.testnet} Testnet` : `${EMOJIS.mainnet} Mainnet`;
 
   return chainEmbed(params.chainId)
-    .setTitle(`${EMOJIS.withdraw} Withdrawal Sent!`)
+    .setTitle(`${EMOJIS.withdraw} Withdrawal Sent`)
     .setDescription(
-      `> Your withdrawal has been broadcast and confirmed on ${chain.emoji} **${chain.name}**.`,
+      `**${formatted} ${params.tokenSymbol}** broadcast on ${chain.emoji} **${chain.name}**`,
     )
     .addFields(
-      {
-        name: "💸 Amount",
-        value: `\`${formatted} ${params.tokenSymbol}\``,
-        inline: true,
-      },
-      {
-        name: "📮 Destination",
-        value: `\`${truncateAddress(params.toAddress)}\``,
-        inline: true,
-      },
-      { name: "⛓️ Chain", value: `${chain.emoji} ${chain.name}`, inline: true },
-      { name: "🌐 Network", value: networkLabel, inline: true },
-      {
-        name: "🔗 Transaction",
-        value: `[View on Explorer](${txUrl})\n\`${params.txHash.slice(0, 20)}…\``,
-        inline: false,
-      },
+      { name: "Amount", value: `\`${formatted} ${params.tokenSymbol}\``, inline: true },
+      { name: "To", value: `\`${truncateAddress(params.toAddress)}\``, inline: true },
+      { name: "Chain", value: `${chain.emoji} ${chain.name}`, inline: true },
+      { name: "Network", value: networkLabel, inline: true },
+      { name: "Transaction", value: `[View on Explorer](${txUrl})\n\`\`\`\n${params.txHash}\n\`\`\``, inline: false },
     );
 }
 
 // ---------------------------------------------------------------------------
-// Error / Success embeds
+// Error / Success
 // ---------------------------------------------------------------------------
 
 export function errorEmbed(message: string): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(0xff4444)
-    .setAuthor({ name: `${BRAND.name} — Error`, iconURL: BRAND.icon })
-    .setTitle(`${EMOJIS.error} Something went wrong`)
+    .setAuthor({ name: BRAND.name, iconURL: BRAND.icon })
+    .setTitle(`${EMOJIS.error} Error`)
     .setDescription(message)
-    .setTimestamp()
-    .setFooter({ text: BRAND.name });
+    .setTimestamp();
 }
 
 export function successEmbed(title: string, message: string): EmbedBuilder {
