@@ -5,6 +5,8 @@ import {
   Partials,
   type ChatInputCommandInteraction,
 } from "discord.js";
+// Re-export client reference so services can send DMs
+export let activeClient: Client | null = null;
 import { config } from "../config.js";
 import { logger } from "../utils/logger.js";
 import { registerEvents } from "./events/ready.js";
@@ -26,8 +28,9 @@ export function createClient(): Client {
       GatewayIntentBits.GuildMembers,
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.MessageContent,
+      GatewayIntentBits.DirectMessages,
     ],
-    partials: [Partials.Channel],
+    partials: [Partials.Channel, Partials.Message],
   });
 
   registerEvents(client);
@@ -60,6 +63,7 @@ export async function startBot(): Promise<Client> {
   }
 
   await client.login(config.discord.token);
+  activeClient = client;
   logger.info(`Bot logged in with ${commands.size} commands`);
   return client;
 }

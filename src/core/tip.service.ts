@@ -3,6 +3,7 @@ import * as txRepo from "../database/repositories/transaction.repo.js";
 import { getOrCreateWallet } from "./wallet.service.js";
 import { getChain } from "../blockchain/chains.js";
 import { TXN_TYPES } from "../utils/constants.js";
+import { formatTokenAmount } from "../utils/format.js";
 import { logger } from "../utils/logger.js";
 
 export interface TipResult {
@@ -21,6 +22,7 @@ export async function sendTip(
   chainId: string,
   token: string,
   isTestnet: boolean,
+  decimals?: number,
 ): Promise<TipResult> {
   getChain(chainId);
 
@@ -34,9 +36,13 @@ export async function sendTip(
   const amountBigInt = BigInt(amount);
 
   if (balance < amountBigInt) {
+    const chain = getChain(chainId);
+    const dec = decimals ?? chain.nativeDecimals;
+    const have = formatTokenAmount(balance.toString(), dec);
+    const need = formatTokenAmount(amount, dec);
     return {
       success: false,
-      error: `Insufficient balance. You have ${balance.toString()} but tried to send ${amount}`,
+      error: `Insufficient balance. You have **${have} ${tokenSymbol}** but tried to send **${need} ${tokenSymbol}**`,
       amount,
       tokenSymbol,
       chain: chainId,

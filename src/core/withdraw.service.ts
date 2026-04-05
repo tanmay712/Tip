@@ -3,12 +3,15 @@ import { Keypair } from "@solana/web3.js";
 import * as userRepo from "../database/repositories/user.repo.js";
 import * as walletRepo from "../database/repositories/wallet.repo.js";
 import * as txRepo from "../database/repositories/transaction.repo.js";
-import { getChain } from "../blockchain/chains.js";
+import { getChain, getExplorerTxUrl } from "../blockchain/chains.js";
 import { getEvmProvider, waitForTransaction } from "../blockchain/provider.js";
 import { transferSol, transferSplToken } from "../blockchain/solana.js";
 import { getPrivateKey } from "./wallet.service.js";
 import { TXN_TYPES } from "../utils/constants.js";
+import { formatTokenAmount, truncateAddress } from "../utils/format.js";
 import { logger } from "../utils/logger.js";
+import { dmUser } from "../bot/notifications.js";
+import { brandEmbed } from "../bot/components/embeds.js";
 
 export interface WithdrawResult {
   success: boolean;
@@ -101,6 +104,28 @@ export async function withdraw(
   });
 
   logger.info({ discordId, chain: chainId, amount, txHash }, "Withdrawal completed");
+
+  // DM the user to confirm
+  const chain2 = getChain(chainId);
+  const formatted = formatTokenAmount(amount, decimals);
+  const txUrl = getExplorerTxUrl(chainId, txHash, isTestnet);
+  const networkLabel = isTestnet ? "🟡 Testnet" : "🟢 Mainnet";
+
+  dmUser(discordId, [
+    brandEmbed()
+      .setColor(0xf5a623)
+      .setTitle("📤 Withdrawal Confirmed!")
+      .setDescription(
+        `Your withdrawal of **${formatted} ${tokenSymbol}** on **${chain2.emoji} ${chain2.name}** has been broadcast and confirmed.`,
+      )
+      .addFields(
+        { name: "Amount", value: `**${formatted} ${tokenSymbol}**`, inline: true },
+        { name: "To", value: `\`${truncateAddress(toAddress)}\``, inline: true },
+        { name: "Network", value: networkLabel, inline: true },
+        { name: "Transaction", value: `[View on Explorer](${txUrl})`, inline: false },
+      )
+      .setFooter({ text: "Hodlr — Tip crypto. Instantly." }),
+  ]).catch(() => {});
 
   return { success: true, txHash, chain: chainId, amount, tokenSymbol };
 }

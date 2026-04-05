@@ -73,3 +73,20 @@ model AirdropClaim {
 
   @@unique([airdropId, userId])
 }
+
+model GuildConfig {
+  id            String   @id @default(cuid())
+  guildId       String   @unique
+  logChannelId  String?
+  adminRoleId   String?
+  updatedAt     DateTime @updatedAt
+  createdAt     DateTime @default(now())
+}
+
+model BannedUser {
+  id        String   @id @default(cuid())
+  discordId String   @unique
+  reason    String?
+  bannedBy  String
+  createdAt DateTime @default(now())
+}

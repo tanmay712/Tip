@@ -1,14 +1,61 @@
 import { PublicKey } from "@solana/web3.js";
 import * as walletRepo from "../database/repositories/wallet.repo.js";
 import * as txRepo from "../database/repositories/transaction.repo.js";
-import { getChain, CHAIN_IDS } from "../blockchain/chains.js";
+import * as userRepo from "../database/repositories/user.repo.js";
+import { getChain, CHAIN_IDS, getExplorerTxUrl } from "../blockchain/chains.js";
 import { getAlchemy } from "../blockchain/alchemy.js";
 import { getSolanaConnection } from "../blockchain/solana.js";
 import { TXN_TYPES, LIMITS } from "../utils/constants.js";
+import { formatTokenAmount } from "../utils/format.js";
 import { logger } from "../utils/logger.js";
 import type { AlchemyWebhookEvent } from "../blockchain/webhooks.js";
+import { dmUser } from "../bot/notifications.js";
+import { brandEmbed } from "../bot/components/embeds.js";
 
 const lastProcessedBlock = new Map<string, string>();
+
+async function notifyDeposit(params: {
+  userId: string;          // Prisma User.id
+  chainId: string;
+  tokenSymbol: string;
+  rawAmount: string;
+  decimals: number;
+  txHash: string;
+  isTestnet: boolean;
+}): Promise<void> {
+  const chain = getChain(params.chainId);
+  const formatted = formatTokenAmount(params.rawAmount, params.decimals);
+  const txUrl = getExplorerTxUrl(params.chainId, params.txHash, params.isTestnet);
+  const networkLabel = params.isTestnet ? "🟡 Testnet" : "🟢 Mainnet";
+
+  // Look up the user's Discord ID from Prisma user ID
+  const user = await userRepo.getUser(""); // placeholder — we use a direct lookup below
+  void user; // suppress unused warning
+
+  // Find the wallet to get discordId via user relation
+  // The userId here is the Prisma User.id, not discordId
+  // We need to find it from the prisma User model
+  const prismaUser = await import("../database/client.js").then((m) =>
+    m.prisma.user.findUnique({ where: { id: params.userId }, select: { discordId: true } }),
+  );
+  if (!prismaUser) return;
+
+  const embed = brandEmbed()
+    .setColor(0x00ff88)
+    .setTitle("📥 Deposit Confirmed!")
+    .setDescription(
+      `Your deposit of **${formatted} ${params.tokenSymbol}** on **${chain.emoji} ${chain.name}** has been credited to your balance.`,
+    )
+    .addFields(
+      { name: "Amount", value: `**${formatted} ${params.tokenSymbol}**`, inline: true },
+      { name: "Chain", value: `${chain.emoji} ${chain.name}`, inline: true },
+      { name: "Network", value: networkLabel, inline: true },
+      { name: "Transaction", value: `[View on Explorer](${txUrl})`, inline: false },
+    )
+    .setFooter({ text: "Hodlr — Tip crypto. Instantly." });
+
+  await dmUser(prismaUser.discordId, [embed]);
+}
 
 export async function processWebhookDeposit(
   event: AlchemyWebhookEvent,
@@ -49,6 +96,17 @@ export async function processWebhookDeposit(
       isTestnet: wallet.isTestnet,
       status: "completed",
     });
+
+    const chain = getChain(wallet.chain);
+    notifyDeposit({
+      userId: wallet.userId,
+      chainId: wallet.chain,
+      tokenSymbol,
+      rawAmount,
+      decimals: chain.nativeDecimals,
+      txHash: activity.hash,
+      isTestnet: wallet.isTestnet,
+    }).catch(() => {});
 
     credited++;
     logger.info(
@@ -134,6 +192,16 @@ async function pollEvmChain(chainId: string, isTestnet: boolean): Promise<void> 
           status: "completed",
         });
 
+        notifyDeposit({
+          userId: wallet.userId,
+          chainId,
+          tokenSymbol,
+          rawAmount,
+          decimals: chain.nativeDecimals,
+          txHash: hash,
+          isTestnet,
+        }).catch(() => {});
+
         logger.info(
           { address: wallet.address, chain: chainId, txHash: hash, amount: rawAmount },
           "Deposit credited via polling",
@@ -196,6 +264,16 @@ async function pollSolanaChain(isTestnet: boolean): Promise<void> {
           isTestnet,
           status: "completed",
         });
+
+        notifyDeposit({
+          userId: wallet.userId,
+          chainId: "solana",
+          tokenSymbol: "SOL",
+          rawAmount: delta.toString(),
+          decimals: 9,
+          txHash: sig.signature,
+          isTestnet,
+        }).catch(() => {});
 
         logger.info(
           { address: wallet.address, txHash: sig.signature, amount: delta },
