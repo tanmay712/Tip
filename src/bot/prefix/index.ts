@@ -1,29 +1,36 @@
-import { type Message, type GuildMember } from "discord.js";
+import { type Message, type GuildMember, ComponentType, type ButtonInteraction } from "discord.js";
 import { ethers } from "ethers";
 import { PublicKey } from "@solana/web3.js";
 import { CHAIN_IDS, getChain } from "../../blockchain/chains.js";
 import { findToken } from "../../blockchain/tokens.js";
 import * as userRepo from "../../database/repositories/user.repo.js";
 import * as txRepo from "../../database/repositories/transaction.repo.js";
+import * as airdropRepo from "../../database/repositories/airdrop.repo.js";
+import * as configRepo from "../../database/repositories/config.repo.js";
+import { handleAdminCommand } from "./admin.js";
 import { getOrCreateWallet, getAllWallets } from "../../core/wallet.service.js";
 import { sendTip } from "../../core/tip.service.js";
 import { sendRain } from "../../core/rain.service.js";
 import { getLeaderboard } from "../../core/leaderboard.service.js";
 import { getPrice } from "../../core/price.service.js";
 import { withdraw } from "../../core/withdraw.service.js";
+import { createAirdrop, claimAirdrop } from "../../core/airdrop.service.js";
 import * as alchemyApi from "../../blockchain/alchemy.js";
 import { getSolBalance } from "../../blockchain/solana.js";
 import { parseTokenAmount, formatTokenAmount, formatUsd } from "../../utils/format.js";
 import {
   tipEmbed,
   rainEmbed,
+  airdropEmbed,
   balanceEmbed,
   errorEmbed,
   successEmbed,
   brandEmbed,
   walletEmbed,
   withdrawEmbed,
+  depositEmbed,
 } from "../components/embeds.js";
+import { airdropClaimButton } from "../components/buttons.js";
 import { BRAND, EMOJIS, PREFIX, LIMITS } from "../../utils/constants.js";
 
 const MEDALS = ["🥇", "🥈", "🥉"];
@@ -37,17 +44,25 @@ const COMMAND_HELP: Record<string, { usage: string; description: string }> = {
     usage: `${PREFIX}rain <amount> <token> [chain]`,
     description: "Distribute tokens evenly among active members.",
   },
+  airdrop: {
+    usage: `${PREFIX}airdrop <amount> <token> <slots> [chain]`,
+    description: "Create a claimable airdrop. Example: `$airdrop 1 ETH 10`",
+  },
   balance: {
     usage: `${PREFIX}balance [chain]`,
     description: "Check balances. Specify a chain for on-chain detail.",
   },
   wallet: {
-    usage: `${PREFIX}wallet [deposit <chain>]`,
-    description: "View wallets or get a deposit address.",
+    usage: `${PREFIX}wallet [deposit <chain>|withdraw <chain> <address> <amount> <token>]`,
+    description: "View wallets, get a deposit address, or withdraw funds.",
+  },
+  deposit: {
+    usage: `${PREFIX}deposit <chain>`,
+    description: "Alias for `$wallet deposit`. Get your deposit address.",
   },
   withdraw: {
     usage: `${PREFIX}withdraw <chain> <address> <amount> <token>`,
-    description: "Withdraw tokens to an external address.",
+    description: "Alias for `$wallet withdraw`. Withdraw tokens to an external address.",
   },
   network: {
     usage: `${PREFIX}network [mainnet|testnet]`,
@@ -63,6 +78,35 @@ const COMMAND_HELP: Record<string, { usage: string; description: string }> = {
   },
 };
 
+/** Reply either in-channel or via DM depending on context. */
+async function safeReply(message: Message, options: Parameters<Message["reply"]>[0]) {
+  return message.reply(options);
+}
+
+/**
+ * For sensitive commands (withdraw/deposit): if in a guild channel, redirect to DMs.
+ * Returns true if we should continue in DMs, false if already in DMs.
+ */
+async function redirectToDm(message: Message): Promise<boolean> {
+  if (!message.guild) return false; // already in DMs
+  try {
+    await message.reply({
+      embeds: [
+        brandEmbed()
+          .setColor(0xf5a623)
+          .setTitle(`${EMOJIS.wallet} Privacy First — Check Your DMs`)
+          .setDescription(
+            "For your security, sensitive wallet operations are handled privately.\n" +
+              "I've sent you a DM to continue.",
+          ),
+      ],
+    });
+  } catch {
+    // channel permissions issue
+  }
+  return true;
+}
+
 export async function handlePrefixCommand(message: Message): Promise<void> {
   const content = message.content.slice(PREFIX.length).trim();
   if (!content) return;
@@ -70,6 +114,17 @@ export async function handlePrefixCommand(message: Message): Promise<void> {
   const parts = content.split(/\s+/);
   const cmd = parts[0].toLowerCase();
   const args = parts.slice(1);
+
+  // Check if user is banned (skip admin commands so admins can unban)
+  if (cmd !== "admin") {
+    const banned = await configRepo.isUserBanned(message.author.id);
+    if (banned) {
+      await message.reply({
+        embeds: [errorEmbed("You have been banned from using Hodlr.")],
+      });
+      return;
+    }
+  }
 
   switch (cmd) {
     case "help":        return handleHelp(message, args);
@@ -79,8 +134,13 @@ export async function handlePrefixCommand(message: Message): Promise<void> {
     case "price":       return handlePrice(message, args);
     case "wallet":      return handleWallet(message, args);
     case "rain":        return handleRain(message, args);
+    case "airdrop":     return handleAirdrop(message, args);
     case "leaderboard": return handleLeaderboard(message, args);
-    case "withdraw":    return handleWithdraw(message, args);
+    // top-level aliases
+    case "withdraw":    return handleWithdrawAlias(message, args);
+    case "deposit":     return handleDepositAlias(message, args);
+    // admin
+    case "admin":       return handleAdminCommand(message, args);
     default:
       await message.reply({
         embeds: [
@@ -91,6 +151,10 @@ export async function handlePrefixCommand(message: Message): Promise<void> {
       });
   }
 }
+
+// ---------------------------------------------------------------------------
+// HELP
+// ---------------------------------------------------------------------------
 
 async function handleHelp(message: Message, args: string[]): Promise<void> {
   const specificCmd = args[0]?.toLowerCase();
@@ -112,24 +176,48 @@ async function handleHelp(message: Message, args: string[]): Promise<void> {
 
   const chainList = CHAIN_IDS.map((c) => {
     const ch = getChain(c);
-    return `${ch.emoji} ${ch.name} (${ch.nativeToken})`;
+    return `${ch.emoji} **${ch.name}** — ${ch.nativeToken}`;
   }).join("\n");
 
   await message.reply({
     embeds: [
       brandEmbed()
         .setTitle(`${BRAND.name} — ${BRAND.tagline}`)
-        .setDescription(`Use \`${PREFIX}<command>\` or slash commands.`)
+        .setDescription(
+          `Use \`${PREFIX}<command>\` or slash commands.\n` +
+            `Run \`${PREFIX}help <command>\` for detailed usage.`,
+        )
         .addFields(
-          { name: `${EMOJIS.tip} Tipping`,     value: `\`${PREFIX}tip\` \`${PREFIX}rain\``, inline: true },
-          { name: `${EMOJIS.wallet} Wallet`,    value: `\`${PREFIX}wallet\` \`${PREFIX}balance\` \`${PREFIX}withdraw\``, inline: true },
-          { name: `${EMOJIS.history} Info`,     value: `\`${PREFIX}leaderboard\` \`${PREFIX}price\``, inline: true },
-          { name: `${EMOJIS.network} Settings`, value: `\`${PREFIX}network\` \`${PREFIX}help\``, inline: true },
+          {
+            name: `${EMOJIS.tip} Tipping`,
+            value: `\`${PREFIX}tip\`  \`${PREFIX}rain\`  \`${PREFIX}airdrop\``,
+            inline: false,
+          },
+          {
+            name: `${EMOJIS.wallet} Wallet`,
+            value:
+              `\`${PREFIX}wallet\`  \`${PREFIX}deposit\`  \`${PREFIX}withdraw\`  \`${PREFIX}balance\``,
+            inline: false,
+          },
+          {
+            name: `${EMOJIS.history} Info`,
+            value: `\`${PREFIX}leaderboard\`  \`${PREFIX}price\``,
+            inline: false,
+          },
+          {
+            name: `${EMOJIS.network} Settings`,
+            value: `\`${PREFIX}network\`  \`${PREFIX}help\``,
+            inline: false,
+          },
           { name: "Supported Chains", value: chainList, inline: false },
         ),
     ],
   });
 }
+
+// ---------------------------------------------------------------------------
+// TIP
+// ---------------------------------------------------------------------------
 
 async function handleTip(message: Message, args: string[]): Promise<void> {
   const target = message.mentions.users.first();
@@ -179,7 +267,9 @@ async function handleTip(message: Message, args: string[]): Promise<void> {
   if (tokenSymbol !== chain.nativeToken) {
     const tokenInfo = findToken(tokenSymbol, chainId);
     if (!tokenInfo) {
-      await message.reply({ embeds: [errorEmbed(`Token ${tokenSymbol} not found on ${chain.name}`)] });
+      await message.reply({
+        embeds: [errorEmbed(`Token ${tokenSymbol} not found on ${chain.name}`)],
+      });
       return;
     }
     token = tokenInfo.contractAddress;
@@ -195,6 +285,7 @@ async function handleTip(message: Message, args: string[]): Promise<void> {
     chainId,
     token,
     isTestnet,
+    decimals,
   );
 
   if (!result.success) {
@@ -227,13 +318,17 @@ async function handleTip(message: Message, args: string[]): Promise<void> {
           tokenSymbol,
           chainId,
           isTestnet,
-        }).setFooter({ text: `Use ${PREFIX}balance to check your balance` }),
+        }).setFooter({ text: `Use ${PREFIX}balance to check your balance · Hodlr` }),
       ],
     });
   } catch {
-    // DMs disabled
+    // DMs disabled — silently ignore
   }
 }
+
+// ---------------------------------------------------------------------------
+// BALANCE
+// ---------------------------------------------------------------------------
 
 async function handleBalance(message: Message, args: string[]): Promise<void> {
   const network = await userRepo.getUserNetwork(message.author.id);
@@ -242,7 +337,9 @@ async function handleBalance(message: Message, args: string[]): Promise<void> {
 
   if (specificChain && !CHAIN_IDS.includes(specificChain)) {
     await message.reply({
-      embeds: [errorEmbed(`Unknown chain \`${specificChain}\`. Valid: ${CHAIN_IDS.join(", ")}`)],
+      embeds: [
+        errorEmbed(`Unknown chain \`${specificChain}\`. Valid: ${CHAIN_IDS.join(", ")}`),
+      ],
     });
     return;
   }
@@ -261,17 +358,34 @@ async function handleBalance(message: Message, args: string[]): Promise<void> {
       nativeBalance = await alchemyApi.getBalance(specificChain, address, isTestnet);
     }
 
-    const internalBalance = await txRepo.getUserBalance(user.id, specificChain, "native", isTestnet);
+    const internalBalance = await txRepo.getUserBalance(
+      user.id,
+      specificChain,
+      "native",
+      isTestnet,
+    );
     const totalNative = (BigInt(nativeBalance) + internalBalance).toString();
-    balances.push({ symbol: chain.nativeToken, amount: totalNative, decimals: chain.nativeDecimals });
+    balances.push({
+      symbol: chain.nativeToken,
+      amount: totalNative,
+      decimals: chain.nativeDecimals,
+    });
 
     if (chain.type === "evm") {
       try {
         const tokenBals = await alchemyApi.getTokenBalances(specificChain, address, isTestnet);
         for (const tb of tokenBals) {
-          const meta = await alchemyApi.getTokenMetadata(specificChain, tb.contractAddress, isTestnet);
+          const meta = await alchemyApi.getTokenMetadata(
+            specificChain,
+            tb.contractAddress,
+            isTestnet,
+          );
           if (meta.symbol) {
-            balances.push({ symbol: meta.symbol, amount: tb.balance, decimals: meta.decimals ?? 18 });
+            balances.push({
+              symbol: meta.symbol,
+              amount: tb.balance,
+              decimals: meta.decimals ?? 18,
+            });
           }
         }
       } catch {
@@ -283,7 +397,11 @@ async function handleBalance(message: Message, args: string[]): Promise<void> {
   } else {
     const embed = brandEmbed()
       .setTitle(`${EMOJIS.wallet} All Balances`)
-      .setDescription(isTestnet ? `${EMOJIS.testnet} Testnet` : `${EMOJIS.mainnet} Mainnet`);
+      .setDescription(
+        isTestnet
+          ? `${EMOJIS.testnet} **Testnet** — internal balances`
+          : `${EMOJIS.mainnet} **Mainnet** — internal balances`,
+      );
 
     let hasBalances = false;
     for (const chainId of CHAIN_IDS) {
@@ -292,7 +410,7 @@ async function handleBalance(message: Message, args: string[]): Promise<void> {
       if (internalBalance > 0n) {
         embed.addFields({
           name: `${chain.emoji} ${chain.name}`,
-          value: `${formatTokenAmount(internalBalance.toString(), chain.nativeDecimals)} ${chain.nativeToken}`,
+          value: `\`${formatTokenAmount(internalBalance.toString(), chain.nativeDecimals)} ${chain.nativeToken}\``,
           inline: true,
         });
         hasBalances = true;
@@ -300,14 +418,20 @@ async function handleBalance(message: Message, args: string[]): Promise<void> {
     }
 
     if (!hasBalances) {
-      embed.setDescription(
-        `${embed.data.description}\n\nNo balances yet. Use \`${PREFIX}wallet deposit <chain>\` to get started!`,
-      );
+      embed.addFields({
+        name: "No balances yet",
+        value: `Use \`${PREFIX}deposit <chain>\` or \`${PREFIX}wallet deposit <chain>\` to get started!`,
+        inline: false,
+      });
     }
 
     await message.reply({ embeds: [embed] });
   }
 }
+
+// ---------------------------------------------------------------------------
+// NETWORK
+// ---------------------------------------------------------------------------
 
 async function handleNetwork(message: Message, args: string[]): Promise<void> {
   const mode = args[0]?.toLowerCase();
@@ -344,6 +468,10 @@ async function handleNetwork(message: Message, args: string[]): Promise<void> {
   });
 }
 
+// ---------------------------------------------------------------------------
+// PRICE
+// ---------------------------------------------------------------------------
+
 async function handlePrice(message: Message, args: string[]): Promise<void> {
   const symbol = args[0]?.toUpperCase();
   if (!symbol) {
@@ -353,7 +481,9 @@ async function handlePrice(message: Message, args: string[]): Promise<void> {
 
   const info = await getPrice(symbol);
   if (!info) {
-    await message.reply({ embeds: [errorEmbed(`Price data not available for **${symbol}**`)] });
+    await message.reply({
+      embeds: [errorEmbed(`Price data not available for **${symbol}**`)],
+    });
     return;
   }
 
@@ -367,61 +497,115 @@ async function handlePrice(message: Message, args: string[]): Promise<void> {
         .setColor(changeColor)
         .setTitle(`${EMOJIS.price} ${symbol} Price`)
         .addFields(
-          { name: "Price", value: formatUsd(info.price), inline: true },
-          { name: `${changeEmoji} 24h Change`, value: changeStr, inline: true },
-        ),
+          { name: "Price (USD)", value: `**${formatUsd(info.price)}**`, inline: true },
+          { name: `${changeEmoji} 24h Change`, value: `**${changeStr}**`, inline: true },
+        )
+        .setFooter({ text: "Powered by CoinGecko · Hodlr" }),
     ],
   });
 }
 
+// ---------------------------------------------------------------------------
+// WALLET — view / deposit / withdraw subcommands
+// ---------------------------------------------------------------------------
+
 async function handleWallet(message: Message, args: string[]): Promise<void> {
-  const network = await userRepo.getUserNetwork(message.author.id);
-  const isTestnet = network === "testnet";
   const sub = args[0]?.toLowerCase();
 
   if (sub === "deposit") {
-    const chainId = args[1]?.toLowerCase();
-    if (!chainId || !CHAIN_IDS.includes(chainId)) {
-      await message.reply({
-        embeds: [errorEmbed(`Specify a valid chain: ${CHAIN_IDS.join(", ")}`)],
-      });
-      return;
-    }
-    const { address } = await getOrCreateWallet(message.author.id, chainId, isTestnet);
-    const embed = walletEmbed({ chain: chainId, address, isTestnet });
-    embed.setDescription(`Send ${getChain(chainId).nativeToken} or tokens to this address to deposit.`);
-    await message.reply({ embeds: [embed] });
-    return;
+    return handleDepositFlow(message, args.slice(1));
   }
+
+  if (sub === "withdraw") {
+    return handleWithdrawFlow(message, args.slice(1));
+  }
+
+  // Default: view all wallets
+  const network = await userRepo.getUserNetwork(message.author.id);
+  const isTestnet = network === "testnet";
 
   const wallets = await getAllWallets(message.author.id, isTestnet);
   const embed = brandEmbed()
     .setTitle(`${EMOJIS.wallet} Your Wallets`)
     .setDescription(
-      `Network: ${isTestnet ? `${EMOJIS.testnet} Testnet` : `${EMOJIS.mainnet} Mainnet`}`,
+      `Network: ${isTestnet ? `${EMOJIS.testnet} **Testnet**` : `${EMOJIS.mainnet} **Mainnet**`}\n` +
+        `Use \`${PREFIX}deposit <chain>\` to fund a wallet.`,
     );
 
   for (const w of wallets) {
     const chain = getChain(w.chain);
-    embed.addFields({ name: `${chain.emoji} ${chain.name}`, value: `\`${w.address}\``, inline: false });
+    embed.addFields({
+      name: `${chain.emoji} ${chain.name}`,
+      value: `\`${w.address}\``,
+      inline: false,
+    });
   }
 
   await message.reply({ embeds: [embed] });
 }
 
-async function handleWithdraw(message: Message, args: string[]): Promise<void> {
+// ---------------------------------------------------------------------------
+// DEPOSIT — core flow (used by $wallet deposit and $deposit alias)
+// ---------------------------------------------------------------------------
+
+async function handleDepositFlow(message: Message, args: string[]): Promise<void> {
+  const shouldRedirect = await redirectToDm(message);
+
+  const chainId = args[0]?.toLowerCase();
+  if (!chainId || !CHAIN_IDS.includes(chainId)) {
+    const errEmbed = errorEmbed(
+      `Specify a valid chain: ${CHAIN_IDS.join(", ")}\nUsage: \`${COMMAND_HELP.deposit.usage}\``,
+    );
+    if (shouldRedirect) {
+      await message.author.send({ embeds: [errEmbed] }).catch(() => {});
+    } else {
+      await message.reply({ embeds: [errEmbed] });
+    }
+    return;
+  }
+
+  const network = await userRepo.getUserNetwork(message.author.id);
+  const isTestnet = network === "testnet";
+  const { address } = await getOrCreateWallet(message.author.id, chainId, isTestnet);
+
+  const embed = depositEmbed({ chain: chainId, address, isTestnet });
+
+  if (shouldRedirect) {
+    await message.author.send({ embeds: [embed] }).catch(() => {});
+  } else {
+    await message.reply({ embeds: [embed] });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// WITHDRAW — core flow (used by $wallet withdraw and $withdraw alias)
+// ---------------------------------------------------------------------------
+
+async function handleWithdrawFlow(message: Message, args: string[]): Promise<void> {
+  const shouldRedirect = await redirectToDm(message);
+
   const [chainArg, toAddress, amountStr, tokenRaw] = args;
 
   if (!chainArg || !toAddress || !amountStr || !tokenRaw) {
-    await message.reply({ embeds: [errorEmbed(`Usage: \`${COMMAND_HELP.withdraw.usage}\``)] });
+    const errEmbed = errorEmbed(`Usage: \`${COMMAND_HELP.withdraw.usage}\``);
+    if (shouldRedirect) {
+      await message.author.send({ embeds: [errEmbed] }).catch(() => {});
+    } else {
+      await message.reply({ embeds: [errEmbed] });
+    }
     return;
   }
 
   const chainId = chainArg.toLowerCase();
   if (!CHAIN_IDS.includes(chainId)) {
-    await message.reply({
-      embeds: [errorEmbed(`Unknown chain \`${chainId}\`. Valid: ${CHAIN_IDS.join(", ")}`)],
-    });
+    const errEmbed = errorEmbed(
+      `Unknown chain \`${chainId}\`. Valid: ${CHAIN_IDS.join(", ")}`,
+    );
+    if (shouldRedirect) {
+      await message.author.send({ embeds: [errEmbed] }).catch(() => {});
+    } else {
+      await message.reply({ embeds: [errEmbed] });
+    }
     return;
   }
 
@@ -431,19 +615,34 @@ async function handleWithdraw(message: Message, args: string[]): Promise<void> {
     try {
       new PublicKey(toAddress);
     } catch {
-      await message.reply({ embeds: [errorEmbed("Invalid Solana address")] });
+      const errEmbed = errorEmbed("Invalid Solana address");
+      if (shouldRedirect) {
+        await message.author.send({ embeds: [errEmbed] }).catch(() => {});
+      } else {
+        await message.reply({ embeds: [errEmbed] });
+      }
       return;
     }
   } else {
     if (!ethers.isAddress(toAddress)) {
-      await message.reply({ embeds: [errorEmbed("Invalid EVM address")] });
+      const errEmbed = errorEmbed("Invalid EVM address");
+      if (shouldRedirect) {
+        await message.author.send({ embeds: [errEmbed] }).catch(() => {});
+      } else {
+        await message.reply({ embeds: [errEmbed] });
+      }
       return;
     }
   }
 
   const amount = parseFloat(amountStr);
   if (isNaN(amount) || amount <= 0) {
-    await message.reply({ embeds: [errorEmbed("Invalid amount")] });
+    const errEmbed = errorEmbed("Invalid amount");
+    if (shouldRedirect) {
+      await message.author.send({ embeds: [errEmbed] }).catch(() => {});
+    } else {
+      await message.reply({ embeds: [errEmbed] });
+    }
     return;
   }
 
@@ -456,11 +655,25 @@ async function handleWithdraw(message: Message, args: string[]): Promise<void> {
   if (tokenSymbol !== chain.nativeToken) {
     const tokenInfo = findToken(tokenSymbol, chainId);
     if (!tokenInfo) {
-      await message.reply({ embeds: [errorEmbed(`Token ${tokenSymbol} not found on ${chain.name}`)] });
+      const errEmbed = errorEmbed(`Token ${tokenSymbol} not found on ${chain.name}`);
+      if (shouldRedirect) {
+        await message.author.send({ embeds: [errEmbed] }).catch(() => {});
+      } else {
+        await message.reply({ embeds: [errEmbed] });
+      }
       return;
     }
     token = tokenInfo.contractAddress;
     decimals = tokenInfo.decimals;
+  }
+
+  // Send "processing" notice
+  const processingEmbed = brandEmbed()
+    .setTitle(`${EMOJIS.loading} Processing Withdrawal…`)
+    .setDescription("Broadcasting your transaction to the network. Please wait.");
+  let processingMsg: import("discord.js").Message | null = null;
+  if (shouldRedirect) {
+    processingMsg = await message.author.send({ embeds: [processingEmbed] }).catch(() => null);
   }
 
   const rawAmount = parseTokenAmount(amountStr, decimals).toString();
@@ -475,25 +688,49 @@ async function handleWithdraw(message: Message, args: string[]): Promise<void> {
     isTestnet,
   );
 
+  if (processingMsg) {
+    await processingMsg.delete().catch(() => {});
+  }
+
   if (!result.success) {
-    await message.reply({ embeds: [errorEmbed(result.error!)] });
+    const errEmbed = errorEmbed(result.error!);
+    if (shouldRedirect) {
+      await message.author.send({ embeds: [errEmbed] }).catch(() => {});
+    } else {
+      await message.reply({ embeds: [errEmbed] });
+    }
     return;
   }
 
-  await message.reply({
-    embeds: [
-      withdrawEmbed({
-        chainId,
-        txHash: result.txHash!,
-        amount: rawAmount,
-        decimals,
-        tokenSymbol,
-        toAddress,
-        isTestnet,
-      }),
-    ],
+  const resultEmbed = withdrawEmbed({
+    chainId,
+    txHash: result.txHash!,
+    amount: rawAmount,
+    decimals,
+    tokenSymbol,
+    toAddress,
+    isTestnet,
   });
+
+  if (shouldRedirect) {
+    await message.author.send({ embeds: [resultEmbed] }).catch(() => {});
+  } else {
+    await message.reply({ embeds: [resultEmbed] });
+  }
 }
+
+// Top-level aliases
+async function handleDepositAlias(message: Message, args: string[]): Promise<void> {
+  return handleDepositFlow(message, args);
+}
+
+async function handleWithdrawAlias(message: Message, args: string[]): Promise<void> {
+  return handleWithdrawFlow(message, args);
+}
+
+// ---------------------------------------------------------------------------
+// RAIN
+// ---------------------------------------------------------------------------
 
 async function handleRain(message: Message, args: string[]): Promise<void> {
   const [amountStr, tokenRaw, chainArg] = args;
@@ -533,7 +770,9 @@ async function handleRain(message: Message, args: string[]): Promise<void> {
   if (tokenSymbol !== chain.nativeToken) {
     const tokenInfo = findToken(tokenSymbol, chainId);
     if (!tokenInfo) {
-      await message.reply({ embeds: [errorEmbed(`Token ${tokenSymbol} not found on ${chain.name}`)] });
+      await message.reply({
+        embeds: [errorEmbed(`Token ${tokenSymbol} not found on ${chain.name}`)],
+      });
       return;
     }
     token = tokenInfo.contractAddress;
@@ -583,6 +822,180 @@ async function handleRain(message: Message, args: string[]): Promise<void> {
   });
 }
 
+// ---------------------------------------------------------------------------
+// AIRDROP
+// ---------------------------------------------------------------------------
+
+async function handleAirdrop(message: Message, args: string[]): Promise<void> {
+  const [amountStr, tokenRaw, slotsStr, chainArg] = args;
+
+  if (!amountStr || !tokenRaw || !slotsStr) {
+    await message.reply({ embeds: [errorEmbed(`Usage: \`${COMMAND_HELP.airdrop.usage}\``)] });
+    return;
+  }
+
+  if (!message.guild) {
+    await message.reply({ embeds: [errorEmbed("This command can only be used in servers")] });
+    return;
+  }
+
+  const amount = parseFloat(amountStr);
+  if (isNaN(amount) || amount <= 0) {
+    await message.reply({ embeds: [errorEmbed("Invalid amount")] });
+    return;
+  }
+
+  const slots = parseInt(slotsStr, 10);
+  if (isNaN(slots) || slots < 1 || slots > LIMITS.maxAirdropSlots) {
+    await message.reply({
+      embeds: [errorEmbed(`Slots must be between 1 and ${LIMITS.maxAirdropSlots}`)],
+    });
+    return;
+  }
+
+  const tokenSymbol = tokenRaw.toUpperCase();
+  const chainId = chainArg?.toLowerCase() || "ethereum";
+
+  if (!CHAIN_IDS.includes(chainId)) {
+    await message.reply({
+      embeds: [errorEmbed(`Unknown chain \`${chainId}\`. Valid: ${CHAIN_IDS.join(", ")}`)],
+    });
+    return;
+  }
+
+  const network = await userRepo.getUserNetwork(message.author.id);
+  const isTestnet = network === "testnet";
+  const chain = getChain(chainId);
+
+  let token = "native";
+  let decimals = chain.nativeDecimals;
+  if (tokenSymbol !== chain.nativeToken) {
+    const tokenInfo = findToken(tokenSymbol, chainId);
+    if (!tokenInfo) {
+      await message.reply({
+        embeds: [errorEmbed(`Token ${tokenSymbol} not found on ${chain.name}`)],
+      });
+      return;
+    }
+    token = tokenInfo.contractAddress;
+    decimals = tokenInfo.decimals;
+  }
+
+  const rawAmount = parseTokenAmount(amountStr, decimals).toString();
+  const result = await createAirdrop(
+    message.author.id,
+    message.guild.id,
+    message.channel.id,
+    rawAmount,
+    tokenSymbol,
+    chainId,
+    token,
+    slots,
+    isTestnet,
+  );
+
+  if (!result.success) {
+    await message.reply({ embeds: [errorEmbed(result.error!)] });
+    return;
+  }
+
+  const expiresAt = new Date(Date.now() + LIMITS.airdropExpiryMinutes * 60 * 1000);
+
+  const sentMsg = await message.reply({
+    embeds: [
+      airdropEmbed({
+        creatorTag: message.author.displayName,
+        totalAmount: result.totalAmount,
+        perClaim: result.perClaim,
+        decimals,
+        tokenSymbol,
+        maxClaims: result.maxClaims,
+        currentClaims: 0,
+        chainId,
+        isTestnet,
+        expiresAt,
+      }),
+    ],
+    components: [airdropClaimButton(result.airdropId!)],
+  });
+
+  await airdropRepo.updateAirdropMessage(result.airdropId!, sentMsg.id);
+
+  const collector = sentMsg.createMessageComponentCollector({
+    componentType: ComponentType.Button,
+    time: LIMITS.airdropExpiryMinutes * 60 * 1000,
+  });
+
+  collector.on("collect", async (btnInteraction: ButtonInteraction) => {
+    if (!btnInteraction.customId.startsWith("airdrop_claim:")) return;
+    await btnInteraction.deferReply({ ephemeral: true });
+
+    const claimResult = await claimAirdrop(result.airdropId!, btnInteraction.user.id, isTestnet);
+
+    if (!claimResult.success) {
+      await btnInteraction.editReply({ embeds: [errorEmbed(claimResult.error!)] });
+      return;
+    }
+
+    await btnInteraction.editReply({
+      embeds: [
+        successEmbed(
+          "Airdrop Claimed!",
+          `You received **${formatTokenAmount(claimResult.amount!, decimals)} ${tokenSymbol}** ${chain.emoji}`,
+        ),
+      ],
+    });
+
+    // Try to DM the claimer
+    try {
+      await btnInteraction.user.send({
+        embeds: [
+          successEmbed(
+            "Airdrop Claimed!",
+            `You claimed **${formatTokenAmount(claimResult.amount!, decimals)} ${tokenSymbol}** from an airdrop by **${message.author.displayName}**!`,
+          ).setFooter({ text: `Use ${PREFIX}balance to check your balance · Hodlr` }),
+        ],
+      });
+    } catch {
+      // DMs disabled
+    }
+
+    // Update the airdrop embed with new claim count
+    const airdrop = await airdropRepo.getAirdrop(result.airdropId!);
+    if (airdrop) {
+      const claimCount = airdrop.claims.length;
+      await sentMsg
+        .edit({
+          embeds: [
+            airdropEmbed({
+              creatorTag: message.author.displayName,
+              totalAmount: result.totalAmount,
+              perClaim: result.perClaim,
+              decimals,
+              tokenSymbol,
+              maxClaims: result.maxClaims,
+              currentClaims: claimCount,
+              chainId,
+              isTestnet,
+              expiresAt,
+            }),
+          ],
+          components:
+            claimCount >= result.maxClaims ? [] : [airdropClaimButton(result.airdropId!)],
+        })
+        .catch(() => {});
+    }
+  });
+
+  collector.on("end", async () => {
+    await sentMsg.edit({ components: [] }).catch(() => {});
+  });
+}
+
+// ---------------------------------------------------------------------------
+// LEADERBOARD
+// ---------------------------------------------------------------------------
+
 async function handleLeaderboard(message: Message, args: string[]): Promise<void> {
   const network = await userRepo.getUserNetwork(message.author.id);
   const isTestnet = network === "testnet";
@@ -612,7 +1025,9 @@ async function handleLeaderboard(message: Message, args: string[]): Promise<void
         .setTitle(`${EMOJIS.leaderboard} Top Tippers`)
         .setDescription(lines.join("\n"))
         .setFooter({
-          text: isTestnet ? `${EMOJIS.testnet} Testnet` : `${EMOJIS.mainnet} Mainnet`,
+          text: isTestnet
+            ? `${EMOJIS.testnet} Testnet · Hodlr`
+            : `${EMOJIS.mainnet} Mainnet · Hodlr`,
         }),
     ],
   });
