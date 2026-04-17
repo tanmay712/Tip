@@ -1,6 +1,5 @@
 import { type Client, type Message, ChannelType } from "discord.js";
 import { PREFIX, EMOJIS } from "../../utils/constants.js";
-import { checkRateLimit } from "../../utils/rate-limit.js";
 import { logger } from "../../utils/logger.js";
 import { handlePrefixCommand } from "../prefix/index.js";
 
@@ -24,14 +23,7 @@ export function registerMessageHandler(client: Client): void {
       return;
     }
 
-    const { allowed, retryAfterMs } = checkRateLimit(message.author.id);
-    if (!allowed) {
-      await message.reply(
-        `${EMOJIS.warning} Slow down! Try again in ${Math.ceil(retryAfterMs / 1000)}s.`,
-      );
-      return;
-    }
-
+    // Rate limiting is handled inside handlePrefixCommand
     try {
       await handlePrefixCommand(message);
     } catch (err) {

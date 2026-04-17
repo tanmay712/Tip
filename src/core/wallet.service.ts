@@ -25,7 +25,7 @@ export async function getOrCreateWallet(
   discordId: string,
   chainId: string,
   isTestnet: boolean,
-): Promise<{ address: string; chain: string; isNew: boolean }> {
+): Promise<{ address: string; chain: string; isNew: boolean; newPrivateKey?: string }> {
   const user = await userRepo.findOrCreateUser(discordId);
   const existing = await walletRepo.getWallet(user.id, chainId, isTestnet);
   if (existing) {
@@ -60,7 +60,7 @@ export async function getOrCreateWallet(
   });
 
   logger.info({ discordId, chain: chainId, isTestnet }, "Wallet created");
-  return { address, chain: chainId, isNew: true };
+  return { address, chain: chainId, isNew: true, newPrivateKey: privateKey };
 }
 
 export async function getAllWallets(discordId: string, isTestnet: boolean) {

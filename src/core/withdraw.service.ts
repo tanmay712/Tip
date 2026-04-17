@@ -7,10 +7,11 @@ import { getChain, getExplorerTxUrl } from "../blockchain/chains.js";
 import { getEvmProvider, waitForTransaction } from "../blockchain/provider.js";
 import { transferSol, transferSplToken } from "../blockchain/solana.js";
 import { getPrivateKey } from "./wallet.service.js";
-import { TXN_TYPES } from "../utils/constants.js";
+import { TXN_TYPES, SECURITY_LIMITS } from "../utils/constants.js";
 import { formatTokenAmount, truncateAddress } from "../utils/format.js";
 import { logger } from "../utils/logger.js";
-import { dmUser } from "../bot/notifications.js";
+import { logSecurityEvent } from "../utils/security.js";
+import { dmUser, logToAllChannels } from "../bot/notifications.js";
 import { brandEmbed } from "../bot/components/embeds.js";
 
 export interface WithdrawResult {
@@ -81,7 +82,17 @@ export async function withdraw(
       }
     }
   } catch (err) {
-    logger.error({ err, discordId, chain: chainId }, "Withdraw failed");
+    logger.error({ err, discordId, chain: chainId, amount, tokenSymbol }, "Withdraw failed");
+    logSecurityEvent({
+      type: "WITHDRAWAL_FAILED",
+      discordId,
+      chainId,
+      amount,
+      decimals,
+      tokenSymbol,
+      isTestnet,
+      extra: { error: (err as Error).message, to: toAddress },
+    });
     return {
       success: false,
       error: `Transaction failed: ${(err as Error).message}`,
@@ -103,7 +114,22 @@ export async function withdraw(
     status: "completed",
   });
 
-  logger.info({ discordId, chain: chainId, amount, txHash }, "Withdrawal completed");
+  logger.info({ discordId, chain: chainId, amount, txHash, tokenSymbol }, "Withdrawal completed");
+
+  // Security event — always log withdrawals, alert if large
+  const largeRaw = SECURITY_LIMITS.largeWithdrawRaw[chainId];
+  const isLarge = largeRaw && BigInt(amount) >= BigInt(largeRaw);
+  logSecurityEvent({
+    type: isLarge ? "LARGE_WITHDRAWAL" : "WITHDRAWAL_COMPLETED",
+    discordId,
+    chainId,
+    amount,
+    decimals,
+    tokenSymbol,
+    txHash,
+    isTestnet,
+    extra: { to: toAddress },
+  });
 
   // DM the user to confirm
   const chain2 = getChain(chainId);
@@ -111,21 +137,33 @@ export async function withdraw(
   const txUrl = getExplorerTxUrl(chainId, txHash, isTestnet);
   const networkLabel = isTestnet ? "🟡 Testnet" : "🟢 Mainnet";
 
-  dmUser(discordId, [
-    brandEmbed()
-      .setColor(0xf5a623)
-      .setTitle("📤 Withdrawal Confirmed!")
-      .setDescription(
-        `Your withdrawal of **${formatted} ${tokenSymbol}** on **${chain2.emoji} ${chain2.name}** has been broadcast and confirmed.`,
-      )
-      .addFields(
-        { name: "Amount", value: `**${formatted} ${tokenSymbol}**`, inline: true },
-        { name: "To", value: `\`${truncateAddress(toAddress)}\``, inline: true },
-        { name: "Network", value: networkLabel, inline: true },
-        { name: "Transaction", value: `[View on Explorer](${txUrl})`, inline: false },
-      )
-      .setFooter({ text: "Hodlr — Tip crypto. Instantly." }),
-  ]).catch(() => {});
+  const withdrawDmEmbed = brandEmbed()
+    .setColor(0xf5a623)
+    .setTitle("📤 Withdrawal Confirmed")
+    .setDescription(
+      `**${formatted} ${tokenSymbol}** sent on ${chain2.emoji} **${chain2.name}**.`,
+    )
+    .addFields(
+      { name: "Amount", value: `\`${formatted} ${tokenSymbol}\``, inline: true },
+      { name: "To", value: `\`${truncateAddress(toAddress)}\``, inline: true },
+      { name: "Network", value: networkLabel, inline: true },
+      { name: "Transaction", value: `[View on Explorer](${txUrl})`, inline: false },
+    )
+    .setFooter({ text: "Hodlr" });
+
+  dmUser(discordId, [withdrawDmEmbed]).catch(() => {});
+
+  // Log to all configured guild log channels
+  const logEmbed = brandEmbed()
+    .setColor(0xf5a623)
+    .setTitle("📤 Withdrawal Sent")
+    .setDescription(`<@${discordId}> withdrew **${formatted} ${tokenSymbol}** on ${chain2.emoji} ${chain2.name}`)
+    .addFields(
+      { name: "To", value: `\`${truncateAddress(toAddress)}\``, inline: true },
+      { name: "Transaction", value: `[Explorer](${txUrl})`, inline: true },
+    )
+    .setFooter({ text: networkLabel });
+  logToAllChannels([logEmbed]).catch(() => {});
 
   return { success: true, txHash, chain: chainId, amount, tokenSymbol };
 }

@@ -8,7 +8,11 @@ import * as txRepo from "../../database/repositories/transaction.repo.js";
 import * as airdropRepo from "../../database/repositories/airdrop.repo.js";
 import * as configRepo from "../../database/repositories/config.repo.js";
 import { handleAdminCommand } from "./admin.js";
-import { getOrCreateWallet, getAllWallets } from "../../core/wallet.service.js";
+import { getOrCreateWallet, getAllWallets, getPrivateKey } from "../../core/wallet.service.js";
+import { dmUserIfEnabled, logToChannel } from "../notifications.js";
+import { activeClient } from "../client.js";
+import { checkRateLimit, recordUsage, formatRetryAfter, type RateLimitAction } from "../../utils/rate-limit.js";
+import { logSecurityEvent } from "../../utils/security.js";
 import { sendTip } from "../../core/tip.service.js";
 import { sendRain } from "../../core/rain.service.js";
 import { getLeaderboard, getLeaderboardUSD, getLeaderboardTips } from "../../core/leaderboard.service.js";
@@ -88,11 +92,52 @@ const COMMAND_HELP: Record<string, { usage: string; description: string }> = {
     usage: `${PREFIX}config`,
     description: "View your current settings.",
   },
+  notifications: {
+    usage: `${PREFIX}notifications [on|off]`,
+    description: "Toggle DM notifications for tips, rain, airdrops, and deposits.",
+  },
+  privatekey: {
+    usage: `${PREFIX}privatekey <chain>`,
+    description: "Export your private key for a chain. DMs only — type CONFIRM when prompted.",
+  },
   hodlr: {
     usage: `${PREFIX}hodlr`,
     description: "Bot overview, stats, and quick-action buttons.",
   },
 };
+
+/**
+ * Check a per-action rate limit and reply with an error embed if exceeded.
+ * Returns true if the user is rate limited (caller should return early).
+ */
+async function isRateLimited(
+  message: Message,
+  action: RateLimitAction,
+): Promise<boolean> {
+  const result = checkRateLimit(message.author.id, action);
+  if (!result.allowed) {
+    const retryStr = formatRetryAfter(result.retryAfterMs);
+    await message.reply({
+      embeds: [
+        brandEmbed()
+          .setColor(0xff8800)
+          .setTitle("⏱️ Slow down")
+          .setDescription(
+            `You're doing that too fast.\n` +
+              `Limit: **${result.limitLabel}**\n` +
+              `Try again in **${retryStr}**.`,
+          ),
+      ],
+    });
+    logSecurityEvent({
+      type: "RATE_LIMITED",
+      discordId: message.author.id,
+      extra: { action, limitLabel: result.limitLabel ?? "", retryAfterMs: result.retryAfterMs },
+    });
+    return true;
+  }
+  return false;
+}
 
 /**
  * For sensitive commands (withdraw/deposit): if in a guild channel, redirect to DMs.
@@ -123,6 +168,29 @@ export async function handlePrefixCommand(message: Message): Promise<void> {
   const cmd = parts[0].toLowerCase();
   const args = parts.slice(1);
 
+  // General command-rate gate — catches spam before any DB work
+  if (cmd !== "admin") {
+    const rl = checkRateLimit(message.author.id, "command");
+    if (!rl.allowed) {
+      const retryStr = formatRetryAfter(rl.retryAfterMs);
+      await message.reply({
+        embeds: [
+          brandEmbed()
+            .setColor(0xff4444)
+            .setTitle("🛑 Too many commands")
+            .setDescription(`Max 15 commands per minute. Try again in **${retryStr}**.`),
+        ],
+      });
+      logSecurityEvent({
+        type: "COMMAND_SPAM",
+        discordId: message.author.id,
+        extra: { cmd, retryAfterMs: rl.retryAfterMs },
+      });
+      return;
+    }
+    recordUsage(message.author.id, "command");
+  }
+
   // Check if user is banned (skip admin commands so admins can unban)
   if (cmd !== "admin") {
     try {
@@ -150,10 +218,12 @@ export async function handlePrefixCommand(message: Message): Promise<void> {
     case "withdraw":    return handleWithdrawAlias(message, args);
     case "deposit":     return handleDepositAlias(message, args);
     // extras
-    case "hodlr":       return handleHodlr(message);
-    case "config":      return handleConfig(message);
+    case "hodlr":         return handleHodlr(message);
+    case "config":        return handleConfig(message);
+    case "notifications": return handleNotifications(message, args);
+    case "privatekey":    return handlePrivateKey(message, args);
     // admin
-    case "admin":       return handleAdminCommand(message, args);
+    case "admin":         return handleAdminCommand(message, args);
     default:
       await message.reply({
         embeds: [
@@ -217,7 +287,7 @@ async function handleHelp(message: Message, args: string[]): Promise<void> {
           },
           {
             name: `⚙️ Settings`,
-            value: `\`${PREFIX}network\`  \`${PREFIX}config\``,
+            value: `\`${PREFIX}network\`  \`${PREFIX}config\`  \`${PREFIX}notifications\`  \`${PREFIX}privatekey\``,
             inline: false,
           },
           { name: "Chains", value: chainList, inline: false },
@@ -231,17 +301,13 @@ async function handleHelp(message: Message, args: string[]): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function handleTip(message: Message, args: string[]): Promise<void> {
-  const target = message.mentions.users.first();
-  if (!target) {
+  if (await isRateLimited(message, "tip")) return;
+
+  const targets = [...message.mentions.users.values()].filter(
+    (u) => !u.bot && u.id !== message.author.id,
+  );
+  if (targets.length === 0) {
     await message.reply({ embeds: [errorEmbed(`Usage: \`${COMMAND_HELP.tip.usage}\``)] });
-    return;
-  }
-  if (target.id === message.author.id) {
-    await message.reply({ embeds: [errorEmbed("You can't tip yourself!")] });
-    return;
-  }
-  if (target.bot) {
-    await message.reply({ embeds: [errorEmbed("You can't tip bots!")] });
     return;
   }
 
@@ -253,8 +319,8 @@ async function handleTip(message: Message, args: string[]): Promise<void> {
     return;
   }
 
-  const amount = parseFloat(amountStr);
-  if (isNaN(amount) || amount <= 0) {
+  const totalAmount = parseFloat(amountStr);
+  if (isNaN(totalAmount) || totalAmount <= 0) {
     await message.reply({ embeds: [errorEmbed("Invalid amount")] });
     return;
   }
@@ -287,55 +353,104 @@ async function handleTip(message: Message, args: string[]): Promise<void> {
     decimals = tokenInfo.decimals;
   }
 
-  const rawAmount = parseTokenAmount(amountStr, decimals).toString();
-  const result = await sendTip(
-    message.author.id,
-    target.id,
-    rawAmount,
-    tokenSymbol,
-    chainId,
-    token,
-    isTestnet,
-    decimals,
+  // Per-recipient amount (split evenly)
+  const perAmountStr = (totalAmount / targets.length).toFixed(
+    decimals > 8 ? 8 : decimals,
   );
+  const rawPerAmount = parseTokenAmount(perAmountStr, decimals).toString();
+  const rawTotalAmount = parseTokenAmount(amountStr, decimals).toString();
 
-  if (!result.success) {
-    await message.reply({ embeds: [errorEmbed(result.error!)] });
+  const failed: string[] = [];
+  const succeeded: string[] = [];
+
+  for (const target of targets) {
+    const result = await sendTip(
+      message.author.id,
+      target.id,
+      rawPerAmount,
+      tokenSymbol,
+      chainId,
+      token,
+      isTestnet,
+      decimals,
+    );
+    if (result.success) {
+      succeeded.push(target.id);
+      recordUsage(message.author.id, "tip");
+    } else {
+      failed.push(`<@${target.id}> (${result.error})`);
+      // Stop early on first failure (likely insufficient balance)
+      break;
+    }
+  }
+
+  // Alert if user hit the per-minute tip cap in a single burst
+  if (succeeded.length >= 5) {
+    logSecurityEvent({
+      type: "TIP_BURST_DETECTED",
+      discordId: message.author.id,
+      extra: { recipients: succeeded.length, tokenSymbol, chainId },
+    });
+  }
+
+  if (succeeded.length === 0) {
+    await message.reply({ embeds: [errorEmbed(failed[0] ?? "Tip failed")] });
     return;
   }
 
-  await message.reply({
-    embeds: [
-      tipEmbed({
-        senderTag: message.author.displayName,
-        receiverTag: target.displayName,
-        amount: rawAmount,
-        decimals,
-        tokenSymbol,
-        chainId,
-        isTestnet,
-      }),
-    ],
-    components: [tipActionRow()],
-  });
+  const networkLabel = isTestnet ? `${EMOJIS.testnet} Testnet` : `${EMOJIS.mainnet} Mainnet`;
+  const formattedPer = formatTokenAmount(rawPerAmount, decimals);
+  const formattedTotal = formatTokenAmount(
+    (BigInt(rawPerAmount) * BigInt(succeeded.length)).toString(),
+    decimals,
+  );
+  const recipientList = succeeded.map((id) => `<@${id}>`).join(", ");
 
-  try {
-    await target.send({
-      embeds: [
-        tipEmbed({
-          senderTag: message.author.displayName,
-          receiverTag: "you",
-          amount: rawAmount,
-          decimals,
-          tokenSymbol,
-          chainId,
-          isTestnet,
-        }).setFooter({ text: `Check your balance with ${PREFIX}balance · Hodlr` }),
-      ],
-      components: [tipActionRow()],
+  const embed = brandEmbed()
+    .setColor(0x00ff88)
+    .setTitle(`${EMOJIS.tip} Tip Sent`)
+    .setDescription(
+      `<@${message.author.id}> sent **${formattedPer} ${tokenSymbol}** to ${recipientList} on ${chain.emoji} **${chain.name}** ${networkLabel}`,
+    );
+
+  if (succeeded.length > 1) {
+    embed.addFields({
+      name: "Total",
+      value: `\`${formattedTotal} ${tokenSymbol}\` split among **${succeeded.length}** recipients`,
+      inline: false,
     });
-  } catch {
-    // DMs disabled
+  }
+
+  if (failed.length > 0) {
+    embed.addFields({ name: "Failed", value: failed.join("\n"), inline: false });
+  }
+
+  await message.reply({ embeds: [embed], components: [tipActionRow()] });
+
+  // Log to guild channel
+  logToChannel(message.guild?.id, [
+    brandEmbed()
+      .setColor(0x00ff88)
+      .setTitle(`${EMOJIS.tip} Tip`)
+      .setDescription(
+        `<@${message.author.id}> tipped **${formattedTotal} ${tokenSymbol}** to ${recipientList} on ${chain.emoji} ${chain.name}`,
+      )
+      .setFooter({ text: networkLabel }),
+  ]).catch(() => {});
+
+  // DM each recipient
+  for (const targetId of succeeded) {
+    const targetUser = message.mentions.users.get(targetId);
+    dmUserIfEnabled(targetId, [
+      brandEmbed()
+        .setColor(0x00ff88)
+        .setTitle(`${EMOJIS.tip} You received a tip!`)
+        .setDescription(
+          `<@${message.author.id}> sent you **${formattedPer} ${tokenSymbol}** on ${chain.emoji} **${chain.name}** ${networkLabel}`,
+        )
+        .setFooter({ text: `Use ${PREFIX}balance to check your balance · Hodlr` }),
+    ]).catch(() => {});
+    void targetUser;
   }
 }
 
@@ -579,9 +694,9 @@ async function handleDepositFlow(message: Message, args: string[]): Promise<void
 
   const network = await userRepo.getUserNetwork(message.author.id);
   const isTestnet = network === "testnet";
-  const { address } = await getOrCreateWallet(message.author.id, chainId, isTestnet);
+  const result = await getOrCreateWallet(message.author.id, chainId, isTestnet);
 
-  const embed = depositEmbed({ chain: chainId, address, isTestnet });
+  const embed = depositEmbed({ chain: chainId, address: result.address, isTestnet });
 
   if (shouldRedirect) {
     await message.author
@@ -590,6 +705,26 @@ async function handleDepositFlow(message: Message, args: string[]): Promise<void
   } else {
     await message.reply({ embeds: [embed], components: [depositActionRow()] });
   }
+
+  // If this is a newly created wallet, DM the private key to the user
+  if (result.isNew && result.newPrivateKey) {
+    const chain = getChain(chainId);
+    await message.author
+      .send({
+        embeds: [
+          brandEmbed()
+            .setColor(0xff4444)
+            .setTitle(`🔑 New ${chain.emoji} ${chain.name} Wallet Created`)
+            .setDescription(
+              `Save this private key somewhere safe. It will not be shown again.\n\n` +
+                `\`\`\`\n${result.newPrivateKey}\n\`\`\`\n` +
+                `**Never share this with anyone.** Use \`${PREFIX}privatekey ${chainId}\` to export it again.`,
+            )
+            .setFooter({ text: "Keep this secret — Hodlr" }),
+        ],
+      })
+      .catch(() => {});
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -597,6 +732,8 @@ async function handleDepositFlow(message: Message, args: string[]): Promise<void
 // ---------------------------------------------------------------------------
 
 async function handleWithdrawFlow(message: Message, args: string[]): Promise<void> {
+  if (await isRateLimited(message, "withdraw")) return;
+
   const shouldRedirect = await redirectToDm(message);
 
   const [chainArg, toAddress, amountStr, tokenRaw] = args;
@@ -717,6 +854,8 @@ async function handleWithdrawFlow(message: Message, args: string[]): Promise<voi
     return;
   }
 
+  recordUsage(message.author.id, "withdraw");
+
   const resultEmbed = withdrawEmbed({
     chainId,
     txHash: result.txHash!,
@@ -750,6 +889,8 @@ async function handleWithdrawAlias(message: Message, args: string[]): Promise<vo
 // ---------------------------------------------------------------------------
 
 async function handleRain(message: Message, args: string[]): Promise<void> {
+  if (await isRateLimited(message, "rain")) return;
+
   const [amountStr, tokenRaw, chainArg] = args;
   if (!amountStr || !tokenRaw) {
     await message.reply({ embeds: [errorEmbed(`Usage: \`${COMMAND_HELP.rain.usage}\``)] });
@@ -823,6 +964,12 @@ async function handleRain(message: Message, args: string[]): Promise<void> {
     return;
   }
 
+  recordUsage(message.author.id, "rain");
+
+  const networkLabel = isTestnet ? `${EMOJIS.testnet} Testnet` : `${EMOJIS.mainnet} Mainnet`;
+  const formattedTotal = formatTokenAmount(result.totalAmount, decimals);
+  const formattedPer = formatTokenAmount(result.perUser, decimals);
+
   await message.reply({
     embeds: [
       rainEmbed({
@@ -837,6 +984,33 @@ async function handleRain(message: Message, args: string[]): Promise<void> {
       }),
     ],
   });
+
+  // Log to guild channel
+  logToChannel(message.guild?.id, [
+    brandEmbed()
+      .setColor(0x00aaff)
+      .setTitle("🌧️ Rain")
+      .setDescription(
+        `<@${message.author.id}> rained **${formattedTotal} ${tokenSymbol}** (${formattedPer} each) on ${chain.emoji} ${chain.name}`,
+      )
+      .addFields({ name: "Recipients", value: `${result.recipients}`, inline: true })
+      .setFooter({ text: networkLabel }),
+  ]).catch(() => {});
+
+  // DM each recipient
+  if (result.recipientIds) {
+    for (const recipientId of result.recipientIds) {
+      dmUserIfEnabled(recipientId, [
+        brandEmbed()
+          .setColor(0x00aaff)
+          .setTitle("🌧️ You were rained on!")
+          .setDescription(
+            `<@${message.author.id}> rained **${formattedPer} ${tokenSymbol}** on ${chain.emoji} **${chain.name}** ${networkLabel}`,
+          )
+          .setFooter({ text: `Use ${PREFIX}balance to check your balance · Hodlr` }),
+      ]).catch(() => {});
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -844,6 +1018,8 @@ async function handleRain(message: Message, args: string[]): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function handleAirdrop(message: Message, args: string[]): Promise<void> {
+  if (await isRateLimited(message, "airdrop")) return;
+
   const amountStr = args[0];
   const tokenRaw = args[1];
   // Smart parse: detect which of args[2]/args[3] is slots (number) vs chain (string)
@@ -928,6 +1104,8 @@ async function handleAirdrop(message: Message, args: string[]): Promise<void> {
     return;
   }
 
+  recordUsage(message.author.id, "airdrop");
+
   const expiresAt = new Date(Date.now() + LIMITS.airdropExpiryMinutes * 60 * 1000);
 
   const sentMsg = await message.reply({
@@ -950,6 +1128,19 @@ async function handleAirdrop(message: Message, args: string[]): Promise<void> {
 
   await airdropRepo.updateAirdropMessage(result.airdropId!, sentMsg.id);
 
+  // Log to guild channel
+  const airdropNetworkLabel = isTestnet ? `${EMOJIS.testnet} Testnet` : `${EMOJIS.mainnet} Mainnet`;
+  logToChannel(message.guild?.id, [
+    brandEmbed()
+      .setColor(0xf5a623)
+      .setTitle("🪂 Airdrop Started")
+      .setDescription(
+        `<@${message.author.id}> started an airdrop of **${formatTokenAmount(result.totalAmount, decimals)} ${tokenSymbol}** on ${chain.emoji} ${chain.name}`,
+      )
+      .addFields({ name: "Slots", value: `${result.maxClaims}`, inline: true })
+      .setFooter({ text: airdropNetworkLabel }),
+  ]).catch(() => {});
+
   const collector = sentMsg.createMessageComponentCollector({
     componentType: ComponentType.Button,
     time: LIMITS.airdropExpiryMinutes * 60 * 1000,
@@ -966,28 +1157,26 @@ async function handleAirdrop(message: Message, args: string[]): Promise<void> {
       return;
     }
 
+    const claimedFormatted = formatTokenAmount(claimResult.amount!, decimals);
     await btnInteraction.editReply({
       embeds: [
         successEmbed(
           "Airdrop Claimed!",
-          `You received **${formatTokenAmount(claimResult.amount!, decimals)} ${tokenSymbol}** ${chain.emoji}`,
+          `You received **${claimedFormatted} ${tokenSymbol}** ${chain.emoji}`,
         ),
       ],
     });
 
-    // Try to DM the claimer
-    try {
-      await btnInteraction.user.send({
-        embeds: [
-          successEmbed(
-            "Airdrop Claimed!",
-            `You claimed **${formatTokenAmount(claimResult.amount!, decimals)} ${tokenSymbol}** from an airdrop by **${message.author.displayName}**!`,
-          ).setFooter({ text: `Use ${PREFIX}balance to check your balance · Hodlr` }),
-        ],
-      });
-    } catch {
-      // DMs disabled
-    }
+    // DM the claimer if they have notifications on
+    dmUserIfEnabled(btnInteraction.user.id, [
+      brandEmbed()
+        .setColor(0x00ff88)
+        .setTitle("🪂 Airdrop Claimed!")
+        .setDescription(
+          `You claimed **${claimedFormatted} ${tokenSymbol}** from an airdrop by **${message.author.displayName}** on ${chain.emoji} **${chain.name}**`,
+        )
+        .setFooter({ text: `Use ${PREFIX}balance to check your balance · Hodlr` }),
+    ]).catch(() => {});
 
     // Update the airdrop embed with new claim count
     const airdrop = await airdropRepo.getAirdrop(result.airdropId!);
@@ -1044,9 +1233,46 @@ async function handleLeaderboard(message: Message, args: string[]): Promise<void
     if (!isNaN(parsed) && parsed > 0) { limit = Math.min(parsed, 25); continue; }
   }
 
-  const entries = tipsMode
-    ? await getLeaderboardTips(isTestnet, tokenFilter, limit)
-    : await getLeaderboardUSD(isTestnet, tokenFilter, limit);
+  let entries = tipsMode
+    ? await getLeaderboardTips(isTestnet, tokenFilter, limit * 3)
+    : await getLeaderboardUSD(isTestnet, tokenFilter, limit * 3);
+
+  // Filter by guild membership context
+  if (message.guild) {
+    // In a server: only show members currently in this guild
+    const guild = message.guild;
+    const filtered = [];
+    for (const e of entries) {
+      try {
+        await guild.members.fetch(e.discordId);
+        filtered.push(e);
+      } catch {
+        // not in this guild
+      }
+      if (filtered.length >= limit) break;
+    }
+    entries = filtered;
+  } else if (activeClient) {
+    // In DMs: only show users who share at least one guild with the caller
+    const mutualGuildIds = activeClient.guilds.cache
+      .filter((g) => g.members.cache.has(message.author.id))
+      .map((g) => g.id);
+    const filtered = [];
+    for (const e of entries) {
+      const isMutual = mutualGuildIds.some((gId) => {
+        const g = activeClient!.guilds.cache.get(gId);
+        return g?.members.cache.has(e.discordId);
+      });
+      if (isMutual) filtered.push(e);
+      if (filtered.length >= limit) break;
+    }
+    entries = filtered;
+  } else {
+    entries = entries.slice(0, limit);
+  }
+
+  // Re-rank after filtering
+  entries = entries.map((e, i) => ({ ...e, rank: i + 1 }));
 
   const networkLabel = isTestnet ? `${EMOJIS.testnet} Testnet` : `${EMOJIS.mainnet} Mainnet`;
   const filterLabel = tokenFilter ? `${tokenFilter} only` : "all tokens";
@@ -1134,7 +1360,7 @@ async function handleConfig(message: Message): Promise<void> {
   const isTestnet = network === "testnet";
   const networkLabel = isTestnet ? `${EMOJIS.testnet} Testnet` : `${EMOJIS.mainnet} Mainnet`;
 
-  const user = await userRepo.findOrCreateUser(message.author.id);
+  const dmEnabled = await userRepo.isDmEnabled(message.author.id);
 
   await message.reply({
     embeds: [
@@ -1142,15 +1368,183 @@ async function handleConfig(message: Message): Promise<void> {
         .setTitle(`⚙️ Your Settings`)
         .addFields(
           { name: "Network", value: networkLabel, inline: true },
-          { name: "User ID", value: `\`${message.author.id}\``, inline: true },
+          { name: "DM Notifications", value: dmEnabled ? "On" : "Off", inline: true },
+          { name: "User ID", value: `\`${message.author.id}\``, inline: false },
           {
-            name: "Switch Network",
-            value: `\`${PREFIX}network mainnet\` or \`${PREFIX}network testnet\``,
+            name: "Commands",
+            value:
+              `\`${PREFIX}network mainnet|testnet\` — switch network\n` +
+              `\`${PREFIX}notifications on|off\` — toggle DM notifications\n` +
+              `\`${PREFIX}privatekey <chain>\` — export private key`,
             inline: false,
           },
         )
         .setFooter({ text: `Hodlr` }),
     ],
   });
-  void user;
+}
+
+// ---------------------------------------------------------------------------
+// NOTIFICATIONS — opt-in/out for DMs
+// ---------------------------------------------------------------------------
+
+async function handleNotifications(message: Message, args: string[]): Promise<void> {
+  const mode = args[0]?.toLowerCase();
+
+  if (!mode) {
+    const enabled = await userRepo.isDmEnabled(message.author.id);
+    await message.reply({
+      embeds: [
+        brandEmbed()
+          .setTitle("🔔 DM Notifications")
+          .setDescription(
+            `DM notifications are currently **${enabled ? "on" : "off"}**.\n` +
+              `Use \`${PREFIX}notifications on\` or \`${PREFIX}notifications off\` to change this.`,
+          ),
+      ],
+    });
+    return;
+  }
+
+  if (mode !== "on" && mode !== "off") {
+    await message.reply({ embeds: [errorEmbed("Use `on` or `off`")] });
+    return;
+  }
+
+  const enabled = mode === "on";
+  await userRepo.setDmEnabled(message.author.id, enabled);
+
+  await message.reply({
+    embeds: [
+      successEmbed(
+        "Notifications Updated",
+        enabled
+          ? "DM notifications are now **on**. You will be notified when you receive tips, rain, airdrops, and deposits."
+          : "DM notifications are now **off**. You will no longer receive DM alerts.",
+      ),
+    ],
+  });
+}
+
+// ---------------------------------------------------------------------------
+// PRIVATE KEY — export wallet private key (DM only, CONFIRM required)
+// ---------------------------------------------------------------------------
+
+async function handlePrivateKey(message: Message, args: string[]): Promise<void> {
+  if (await isRateLimited(message, "privatekey")) return;
+
+  // Must be used in DMs
+  if (message.guild) {
+    await message.reply({
+      embeds: [
+        brandEmbed()
+          .setColor(0xf5a623)
+          .setTitle("🔒 Private Key Export")
+          .setDescription("For your security, this command can only be used in DMs.\nSend me a DM and try again."),
+      ],
+    });
+    return;
+  }
+
+  const chainArg = args[0]?.toLowerCase();
+  if (!chainArg || !CHAIN_IDS.includes(chainArg)) {
+    await message.reply({
+      embeds: [
+        errorEmbed(
+          `Specify a valid chain.\nUsage: \`${COMMAND_HELP.privatekey.usage}\`\nValid chains: ${CHAIN_IDS.join(", ")}`,
+        ),
+      ],
+    });
+    return;
+  }
+
+  const network = await userRepo.getUserNetwork(message.author.id);
+  const isTestnet = network === "testnet";
+  const chain = getChain(chainArg);
+
+  // Confirmation step
+  await message.reply({
+    embeds: [
+      brandEmbed()
+        .setColor(0xff4444)
+        .setTitle("⚠️ Confirm Private Key Export")
+        .setDescription(
+          `You are about to export your **${chain.emoji} ${chain.name}** private key.\n\n` +
+            `**Never share your private key with anyone.**\n` +
+            `Anyone with your private key has full control of your wallet.\n\n` +
+            `Type \`CONFIRM\` within 60 seconds to proceed.`,
+        ),
+    ],
+  });
+
+  // Wait for CONFIRM message
+  let confirmed = false;
+  if (message.channel.isTextBased() && !message.channel.isThread() && "awaitMessages" in message.channel) {
+    try {
+      const collected = await (message.channel as import("discord.js").DMChannel).awaitMessages({
+        filter: (m: import("discord.js").Message) =>
+          m.author.id === message.author.id && m.content === "CONFIRM",
+        max: 1,
+        time: 60_000,
+        errors: ["time"],
+      });
+      confirmed = collected.size > 0;
+    } catch {
+      confirmed = false;
+    }
+  }
+
+  if (!confirmed) {
+    await message.reply({
+      embeds: [errorEmbed("Timed out or no confirmation received. Export cancelled.")],
+    });
+    return;
+  }
+
+  const wallet = await getWalletForChainByDiscordId(message.author.id, chainArg, isTestnet);
+  if (!wallet) {
+    await message.reply({
+      embeds: [errorEmbed(`No ${chain.name} wallet found. Use \`${PREFIX}deposit ${chainArg}\` to create one.`)],
+    });
+    return;
+  }
+
+  const pk = getPrivateKey(wallet.encryptedKey);
+
+  recordUsage(message.author.id, "privatekey");
+  logSecurityEvent({
+    type: "PRIVATE_KEY_EXPORT",
+    discordId: message.author.id,
+    chainId: chainArg,
+    isTestnet,
+    extra: { network: isTestnet ? "testnet" : "mainnet" },
+  });
+
+  await message.reply({
+    embeds: [
+      brandEmbed()
+        .setColor(0xff4444)
+        .setTitle(`🔑 ${chain.emoji} ${chain.name} Private Key`)
+        .setDescription(
+          `\`\`\`\n${pk}\n\`\`\`\n` +
+            `**Delete this message after saving your key.**\n` +
+            `Never share this with anyone. Hodlr support will never ask for it.`,
+        )
+        .setFooter({ text: "Keep this secret — Hodlr" }),
+    ],
+  });
+}
+
+// Helper used by handlePrivateKey
+async function getWalletForChainByDiscordId(
+  discordId: string,
+  chainId: string,
+  isTestnet: boolean,
+) {
+  const user = await userRepo.getUser(discordId);
+  if (!user) return null;
+  const { prisma } = await import("../../database/client.js");
+  return prisma.wallet.findUnique({
+    where: { userId_chain_isTestnet: { userId: user.id, chain: chainId, isTestnet } },
+  });
 }

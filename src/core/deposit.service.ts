@@ -5,11 +5,12 @@ import { prisma } from "../database/client.js";
 import { getChain, CHAIN_IDS, getExplorerTxUrl } from "../blockchain/chains.js";
 import { getAlchemy } from "../blockchain/alchemy.js";
 import { getSolanaConnection } from "../blockchain/solana.js";
-import { TXN_TYPES, LIMITS } from "../utils/constants.js";
+import { TXN_TYPES, LIMITS, SECURITY_LIMITS } from "../utils/constants.js";
 import { formatTokenAmount } from "../utils/format.js";
 import { logger } from "../utils/logger.js";
+import { logSecurityEvent } from "../utils/security.js";
 import type { AlchemyWebhookEvent } from "../blockchain/webhooks.js";
-import { dmUser } from "../bot/notifications.js";
+import { dmUser, logToAllChannels } from "../bot/notifications.js";
 import { brandEmbed } from "../bot/components/embeds.js";
 
 const lastProcessedBlock = new Map<string, string>();
@@ -49,6 +50,19 @@ async function notifyDeposit(params: {
     .setFooter({ text: "Hodlr" });
 
   await dmUser(prismaUser.discordId, [embed]);
+
+  // Log to all configured guild log channels
+  const logEmbed = brandEmbed()
+    .setColor(0x00ff88)
+    .setTitle("📥 Deposit Received")
+    .setDescription(`<@${prismaUser.discordId}> deposited **${formatted} ${params.tokenSymbol}** on ${chain.emoji} ${chain.name}`)
+    .addFields(
+      { name: "Amount", value: `\`${formatted} ${params.tokenSymbol}\``, inline: true },
+      { name: "Chain", value: `${chain.emoji} ${chain.name}`, inline: true },
+      { name: "Transaction", value: `[Explorer](${txUrl})`, inline: true },
+    )
+    .setFooter({ text: networkLabel });
+  logToAllChannels([logEmbed]).catch(() => {});
 }
 
 export async function processWebhookDeposit(
@@ -79,6 +93,24 @@ export async function processWebhookDeposit(
           activity.value * 10 ** getChain(wallet.chain).nativeDecimals,
         ).toString();
 
+    const chain = getChain(wallet.chain);
+
+    // Dust filter — ignore deposits below minimum threshold
+    const minRaw = SECURITY_LIMITS.minDepositRaw[wallet.chain];
+    if (minRaw && BigInt(rawAmount) < BigInt(minRaw)) {
+      logSecurityEvent({
+        type: "DUST_DEPOSIT_IGNORED",
+        chainId: wallet.chain,
+        amount: rawAmount,
+        decimals: chain.nativeDecimals,
+        tokenSymbol,
+        txHash: activity.hash,
+        isTestnet: wallet.isTestnet,
+        extra: { address: toAddress },
+      });
+      continue;
+    }
+
     await txRepo.createTransaction({
       type: TXN_TYPES.DEPOSIT,
       receiverId: wallet.userId,
@@ -91,7 +123,20 @@ export async function processWebhookDeposit(
       status: "completed",
     });
 
-    const chain = getChain(wallet.chain);
+    // Alert on large deposits
+    const largeRaw = SECURITY_LIMITS.largeDepositRaw[wallet.chain];
+    const isLarge = largeRaw && BigInt(rawAmount) >= BigInt(largeRaw);
+    logSecurityEvent({
+      type: isLarge ? "LARGE_DEPOSIT" : "DEPOSIT_CREDITED",
+      chainId: wallet.chain,
+      amount: rawAmount,
+      decimals: chain.nativeDecimals,
+      tokenSymbol,
+      txHash: activity.hash,
+      isTestnet: wallet.isTestnet,
+      extra: { address: toAddress },
+    });
+
     notifyDeposit({
       userId: wallet.userId,
       chainId: wallet.chain,
@@ -104,7 +149,7 @@ export async function processWebhookDeposit(
 
     credited++;
     logger.info(
-      { address: toAddress, chain: wallet.chain, txHash: activity.hash },
+      { address: toAddress, chain: wallet.chain, txHash: activity.hash, amount: rawAmount },
       "Deposit credited via webhook",
     );
   }
@@ -174,6 +219,22 @@ async function pollEvmChain(chainId: string, isTestnet: boolean): Promise<void> 
 
         if (BigInt(rawAmount) <= 0n) continue;
 
+        // Dust filter
+        const minRaw = SECURITY_LIMITS.minDepositRaw[chainId];
+        if (minRaw && BigInt(rawAmount) < BigInt(minRaw)) {
+          logSecurityEvent({
+            type: "DUST_DEPOSIT_IGNORED",
+            chainId,
+            amount: rawAmount,
+            decimals: chain.nativeDecimals,
+            tokenSymbol,
+            txHash: hash,
+            isTestnet,
+            extra: { address: wallet.address },
+          });
+          continue;
+        }
+
         await txRepo.createTransaction({
           type: TXN_TYPES.DEPOSIT,
           receiverId: wallet.userId,
@@ -184,6 +245,20 @@ async function pollEvmChain(chainId: string, isTestnet: boolean): Promise<void> 
           txHash: hash,
           isTestnet,
           status: "completed",
+        });
+
+        // Large deposit alert
+        const largeRaw = SECURITY_LIMITS.largeDepositRaw[chainId];
+        const isLarge = largeRaw && BigInt(rawAmount) >= BigInt(largeRaw);
+        logSecurityEvent({
+          type: isLarge ? "LARGE_DEPOSIT" : "DEPOSIT_CREDITED",
+          chainId,
+          amount: rawAmount,
+          decimals: chain.nativeDecimals,
+          tokenSymbol,
+          txHash: hash,
+          isTestnet,
+          extra: { address: wallet.address },
         });
 
         notifyDeposit({
@@ -247,23 +322,55 @@ async function pollSolanaChain(isTestnet: boolean): Promise<void> {
         const delta = postBalance - preBalance;
         if (delta <= 0) continue;
 
+        const deltaStr = delta.toString();
+
+        // Dust filter
+        const minRaw = SECURITY_LIMITS.minDepositRaw["solana"];
+        if (minRaw && BigInt(deltaStr) < BigInt(minRaw)) {
+          logSecurityEvent({
+            type: "DUST_DEPOSIT_IGNORED",
+            chainId: "solana",
+            amount: deltaStr,
+            decimals: 9,
+            tokenSymbol: "SOL",
+            txHash: sig.signature,
+            isTestnet,
+            extra: { address: wallet.address },
+          });
+          continue;
+        }
+
         await txRepo.createTransaction({
           type: TXN_TYPES.DEPOSIT,
           receiverId: wallet.userId,
           chain: "solana",
           token: "native",
           tokenSymbol: "SOL",
-          amount: delta.toString(),
+          amount: deltaStr,
           txHash: sig.signature,
           isTestnet,
           status: "completed",
+        });
+
+        // Large deposit alert
+        const largeRaw = SECURITY_LIMITS.largeDepositRaw["solana"];
+        const isLarge = largeRaw && BigInt(deltaStr) >= BigInt(largeRaw);
+        logSecurityEvent({
+          type: isLarge ? "LARGE_DEPOSIT" : "DEPOSIT_CREDITED",
+          chainId: "solana",
+          amount: deltaStr,
+          decimals: 9,
+          tokenSymbol: "SOL",
+          txHash: sig.signature,
+          isTestnet,
+          extra: { address: wallet.address },
         });
 
         notifyDeposit({
           userId: wallet.userId,
           chainId: "solana",
           tokenSymbol: "SOL",
-          rawAmount: delta.toString(),
+          rawAmount: deltaStr,
           decimals: 9,
           txHash: sig.signature,
           isTestnet,

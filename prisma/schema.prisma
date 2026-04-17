@@ -11,6 +11,7 @@ model User {
   id           String        @id @default(cuid())
   discordId    String        @unique
   network      String        @default("mainnet")
+  dmEnabled    Boolean       @default(false)
   createdAt    DateTime      @default(now())
   wallets      Wallet[]
   sentTxns     Transaction[] @relation("sender")

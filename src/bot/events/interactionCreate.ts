@@ -5,7 +5,7 @@ import {
   type ButtonInteraction,
 } from "discord.js";
 import { commands } from "../client.js";
-import { checkRateLimit } from "../../utils/rate-limit.js";
+import { checkRateLimit, recordUsage, formatRetryAfter } from "../../utils/rate-limit.js";
 import { logger } from "../../utils/logger.js";
 import { EMOJIS, PREFIX, BRAND } from "../../utils/constants.js";
 import { brandEmbed, errorEmbed } from "../components/embeds.js";
@@ -37,14 +37,15 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   const command = commands.get(interaction.commandName);
   if (!command) return;
 
-  const { allowed, retryAfterMs } = checkRateLimit(interaction.user.id);
-  if (!allowed) {
+  const rl = checkRateLimit(interaction.user.id, "command");
+  if (!rl.allowed) {
     await interaction.reply({
-      content: `${EMOJIS.warning} Slow down! Try again in ${Math.ceil(retryAfterMs / 1000)}s.`,
+      content: `${EMOJIS.warning} Slow down! Try again in **${formatRetryAfter(rl.retryAfterMs)}**.`,
       ephemeral: true,
     });
     return;
   }
+  recordUsage(interaction.user.id, "command");
 
   try {
     await command.execute(interaction);

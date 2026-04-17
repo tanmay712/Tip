@@ -36,3 +36,19 @@ export async function getUserNetwork(
   });
   return (user?.network as "mainnet" | "testnet") ?? config.defaultNetwork;
 }
+
+export async function setDmEnabled(discordId: string, enabled: boolean): Promise<void> {
+  await prisma.user.upsert({
+    where: { discordId },
+    update: { dmEnabled: enabled },
+    create: { discordId, network: config.defaultNetwork, dmEnabled: enabled },
+  });
+}
+
+export async function isDmEnabled(discordId: string): Promise<boolean> {
+  const user = await prisma.user.findUnique({
+    where: { discordId },
+    select: { dmEnabled: true },
+  });
+  return user?.dmEnabled ?? false;
+}

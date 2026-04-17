@@ -62,7 +62,7 @@ export async function sendTip(
   });
 
   logger.info(
-    { from: senderDiscordId, to: receiverDiscordId, amount, token: tokenSymbol, chain: chainId },
+    { from: senderDiscordId, to: receiverDiscordId, amount, token: tokenSymbol, chain: chainId, isTestnet },
     "Tip sent",
   );
 

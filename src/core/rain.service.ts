@@ -9,6 +9,7 @@ export interface RainResult {
   error?: string;
   perUser: string;
   recipients: number;
+  recipientIds: string[];
   totalAmount: string;
   tokenSymbol: string;
   chain: string;
@@ -30,6 +31,7 @@ export async function sendRain(
       error: "No eligible recipients found",
       perUser: "0",
       recipients: 0,
+      recipientIds: [],
       totalAmount,
       tokenSymbol,
       chain: chainId,
@@ -49,6 +51,7 @@ export async function sendRain(
       error: "Insufficient balance",
       perUser: "0",
       recipients: recipients.length,
+      recipientIds: [],
       totalAmount: actualDebit.toString(),
       tokenSymbol,
       chain: chainId,
@@ -83,6 +86,7 @@ export async function sendRain(
     success: true,
     perUser,
     recipients: recipients.length,
+    recipientIds: recipients,
     totalAmount: actualDebit.toString(),
     tokenSymbol,
     chain: chainId,

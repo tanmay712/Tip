@@ -25,6 +25,8 @@ import { prisma } from "../../database/client.js";
 import { formatTokenAmount } from "../../utils/format.js";
 import { brandEmbed, errorEmbed, successEmbed } from "../components/embeds.js";
 import { EMOJIS, PREFIX } from "../../utils/constants.js";
+import { logSecurityEvent } from "../../utils/security.js";
+import { logger } from "../../utils/logger.js";
 
 const ADMIN_HELP = `
 **$admin subcommands:**
@@ -101,6 +103,19 @@ async function adminBan(message: Message, args: string[]): Promise<void> {
 
   await configRepo.banUser(target.id, message.author.id, reason);
 
+  logSecurityEvent({
+    type: "USER_BANNED",
+    discordId: target.id,
+    extra: {
+      bannedBy: message.author.id,
+      ...(reason ? { reason } : {}),
+    },
+  });
+  logger.warn(
+    { bannedUser: target.id, bannedBy: message.author.id, reason },
+    "User banned",
+  );
+
   await message.reply({
     embeds: [
       successEmbed(
@@ -138,6 +153,13 @@ async function adminUnban(message: Message, args: string[]): Promise<void> {
     await message.reply({ embeds: [errorEmbed(`**${target.username}** is not banned.`)] });
     return;
   }
+
+  logSecurityEvent({
+    type: "USER_UNBANNED",
+    discordId: target.id,
+    extra: { unbannedBy: message.author.id },
+  });
+  logger.info({ unbannedUser: target.id, unbannedBy: message.author.id }, "User unbanned");
 
   await message.reply({
     embeds: [successEmbed("User Unbanned", `**${target.username}** can now use Hodlr again.`)],
@@ -217,6 +239,11 @@ async function adminBroadcast(message: Message, args: string[]): Promise<void> {
       failed++;
     }
   }
+
+  logger.info(
+    { sentBy: message.author.id, delivered: sent, failed, guild: message.guild?.id },
+    "Broadcast sent",
+  );
 
   await message.reply({
     embeds: [
