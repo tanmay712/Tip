@@ -1,9 +1,9 @@
 ---
 title: API Reference
-description: Hodlr REST API endpoints
+description: Crypto REST API endpoints
 ---
 
-Hodlr runs a lightweight Fastify HTTP server alongside the Discord bot, primarily for health checks and Alchemy webhooks.
+Crypto runs a Fastify HTTP server alongside the Discord bot for health checks, the account/legal dashboard, Discord OAuth recovery flows, and Alchemy webhooks.
 
 ## Base URL
 

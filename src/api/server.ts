@@ -4,10 +4,12 @@ import { logger } from "../utils/logger.js";
 import { registerWebhookRoutes } from "./routes/webhooks.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerStatsRoutes } from "./routes/stats.js";
+import { registerDashboardRoutes } from "./routes/dashboard.js";
 
 export async function startApiServer(): Promise<void> {
   const app = Fastify({ logger: false });
 
+  registerDashboardRoutes(app);
   registerHealthRoutes(app);
   registerStatsRoutes(app);
   registerWebhookRoutes(app);

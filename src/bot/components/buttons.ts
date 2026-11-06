@@ -4,6 +4,13 @@ import {
   ButtonStyle,
 } from "discord.js";
 
+export function consentActionRow(): ActionRowBuilder<ButtonBuilder> {
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("tipx:consent:accept").setLabel("Accept and continue").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("tipx:consent:decline").setLabel("Decline").setStyle(ButtonStyle.Secondary),
+  );
+}
+
 export function airdropClaimButton(
   airdropId: string,
 ): ActionRowBuilder<ButtonBuilder> {
@@ -59,12 +66,12 @@ export function paginationButtons(
 export function tipActionRow(): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId("hodlr:balance")
+      .setCustomId("tipx:balance")
       .setLabel("Balance")
       .setEmoji("💰")
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId("hodlr:leaderboard")
+      .setCustomId("tipx:leaderboard")
       .setLabel("Leaderboard")
       .setEmoji("🏆")
       .setStyle(ButtonStyle.Secondary),
@@ -74,12 +81,12 @@ export function tipActionRow(): ActionRowBuilder<ButtonBuilder> {
 export function depositActionRow(): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId("hodlr:balance")
+      .setCustomId("tipx:balance")
       .setLabel("Check Balance")
       .setEmoji("💰")
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
-      .setCustomId("hodlr:wallet")
+      .setCustomId("tipx:wallet")
       .setLabel("All Wallets")
       .setEmoji("👛")
       .setStyle(ButtonStyle.Secondary),
@@ -89,7 +96,7 @@ export function depositActionRow(): ActionRowBuilder<ButtonBuilder> {
 export function withdrawActionRow(): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId("hodlr:balance")
+      .setCustomId("tipx:balance")
       .setLabel("Check Balance")
       .setEmoji("💰")
       .setStyle(ButtonStyle.Secondary),
@@ -99,17 +106,17 @@ export function withdrawActionRow(): ActionRowBuilder<ButtonBuilder> {
 export function hodlrMenuRow1(): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId("hodlr:balance")
+      .setCustomId("tipx:balance")
       .setLabel("Balance")
       .setEmoji("💰")
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
-      .setCustomId("hodlr:deposit")
+      .setCustomId("tipx:deposit")
       .setLabel("Deposit")
       .setEmoji("📥")
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
-      .setCustomId("hodlr:withdraw_info")
+      .setCustomId("tipx:withdraw_info")
       .setLabel("Withdraw")
       .setEmoji("📤")
       .setStyle(ButtonStyle.Primary),
@@ -119,22 +126,22 @@ export function hodlrMenuRow1(): ActionRowBuilder<ButtonBuilder> {
 export function hodlrMenuRow2(): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId("hodlr:tip_info")
+      .setCustomId("tipx:tip_info")
       .setLabel("Tip")
       .setEmoji("💸")
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId("hodlr:leaderboard")
+      .setCustomId("tipx:leaderboard")
       .setLabel("Leaderboard")
       .setEmoji("🏆")
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId("hodlr:prices")
+      .setCustomId("tipx:prices")
       .setLabel("Prices")
       .setEmoji("📊")
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId("hodlr:help")
+      .setCustomId("tipx:help")
       .setLabel("Help")
       .setEmoji("❓")
       .setStyle(ButtonStyle.Secondary),

@@ -63,7 +63,7 @@ export async function logToAllChannels(embeds: EmbedBuilder[]): Promise<void> {
       where: { logChannelId: { not: null } },
       select: { guildId: true },
     });
-    await Promise.allSettled(configs.map((c) => logToChannel(c.guildId, embeds)));
+    await Promise.allSettled(configs.map((c: { guildId: string }) => logToChannel(c.guildId, embeds)));
   } catch (err) {
     logger.warn({ err }, "Failed to log to all channels");
   }

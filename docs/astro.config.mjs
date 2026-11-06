@@ -4,10 +4,10 @@ import starlight from "@astrojs/starlight";
 export default defineConfig({
   integrations: [
     starlight({
-      title: "Hodlr",
+      title: "Crypto",
       description: "Modern Discord crypto tipping bot documentation",
       social: {
-        github: "https://github.com/HiLleywyn/hodlr",
+        github: "https://github.com/tanmay712/Tip",
       },
       sidebar: [
         { label: "Home", link: "/" },

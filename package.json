@@ -1,7 +1,7 @@
 {
-  "name": "hodlr",
+  "name": "crypto-discord-bot",
   "version": "1.0.0",
-  "description": "Modern Discord crypto tipping bot powered by Alchemy — tip, rain, airdrop across 8+ chains",
+  "description": "Crypto Discord tipping bot with Discord Components V2 and configurable application emojis",
   "main": "dist/index.js",
   "type": "module",
   "author": "HiLleywyn <lleywyn@proton.me>",
@@ -23,20 +23,26 @@
     "docs:build": "cd docs && npm run build",
     "typedoc": "typedoc --entryPoints src --entryPointStrategy expand --out docs-api",
     "lint": "eslint src --ext .ts",
-    "format": "prettier --write \"src/**/*.ts\""
+    "format": "prettier --write \"src/**/*.ts\"",
+    "emojis:upload": "tsx scripts/upload-emojis.ts",
+    "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.5.0",
     "@solana/spl-token": "^0.4.9",
     "@solana/web3.js": "^1.98.0",
     "alchemy-sdk": "^3.5.0",
+    "bip32": "^5.0.1",
+    "bitcoinjs-lib": "^7.0.5",
     "discord.js": "^14.17.0",
     "dotenv": "^16.4.7",
+    "ecpair": "^3.0.2",
     "ethers": "^6.13.0",
     "fastify": "^5.2.0",
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
     "prisma": "^6.19.2",
+    "tiny-secp256k1": "^2.2.5",
     "utf-8-validate": "^5.0.10"
   },
   "devDependencies": {

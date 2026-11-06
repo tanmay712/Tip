@@ -5,7 +5,8 @@ import { getOrCreateWallet } from "../../core/wallet.service.js";
 import { CHAIN_IDS, getChain } from "../../blockchain/chains.js";
 import * as alchemyApi from "../../blockchain/alchemy.js";
 import { getSolBalance } from "../../blockchain/solana.js";
-import { balanceEmbed, brandEmbed, errorEmbed } from "../components/embeds.js";
+
+import { balanceEmbed, brandEmbed } from "../components/embeds.js";
 import { EMOJIS } from "../../utils/constants.js";
 import type { BotCommand } from "../client.js";
 
@@ -31,7 +32,9 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
   if (chains.length === 1) {
     const chainId = chains[0];
     const chain = getChain(chainId);
-    const { address } = await getOrCreateWallet(interaction.user.id, chainId, isTestnet);
+    const address = chain.type === "litecoin"
+      ? ""
+      : (await getOrCreateWallet(interaction.user.id, chainId, isTestnet)).address;
 
     const balances: Array<{ symbol: string; amount: string; decimals: number }> = [];
 
@@ -39,6 +42,8 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     let nativeBalance: string;
     if (chain.type === "solana") {
       nativeBalance = await getSolBalance(address, isTestnet);
+    } else if (chain.type === "litecoin") {
+      nativeBalance = "0"; // LTC balances shown here are pooled internal liabilities, not the address's backing reserve.
     } else {
       nativeBalance = await alchemyApi.getBalance(chainId, address, isTestnet);
     }
@@ -51,7 +56,9 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       isTestnet,
     );
 
-    const totalNative = (BigInt(nativeBalance) + internalBalance).toString();
+    const totalNative = chain.type === "litecoin"
+      ? internalBalance.toString()
+      : (BigInt(nativeBalance) + internalBalance).toString();
     balances.push({
       symbol: chain.nativeToken,
       amount: totalNative,

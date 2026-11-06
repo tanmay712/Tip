@@ -9,7 +9,7 @@ import { checkRateLimit, recordUsage, formatRetryAfter } from "../../utils/rate-
 import { logger } from "../../utils/logger.js";
 import { EMOJIS, PREFIX, BRAND } from "../../utils/constants.js";
 import { brandEmbed, errorEmbed } from "../components/embeds.js";
-import { hodlrMenuRow1, hodlrMenuRow2 } from "../components/buttons.js";
+import { hodlrMenuRow1, hodlrMenuRow2, consentActionRow } from "../components/buttons.js";
 import * as userRepo from "../../database/repositories/user.repo.js";
 import * as txRepo from "../../database/repositories/transaction.repo.js";
 import { getOrCreateWallet } from "../../core/wallet.service.js";
@@ -19,16 +19,18 @@ import { CHAIN_IDS, getChain } from "../../blockchain/chains.js";
 import { formatTokenAmount, formatUsd } from "../../utils/format.js";
 import * as alchemyApi from "../../blockchain/alchemy.js";
 import { getSolBalance } from "../../blockchain/solana.js";
+import { withComponentsV2 } from "../components/v2.js";
+import { config } from "../../config.js";
 
 const MEDALS = ["🥇", "🥈", "🥉"];
-const PRICE_SYMBOLS = ["ETH", "SOL", "AVAX", "POL", "ARB", "OP", "USDC", "BTC"];
+const PRICE_SYMBOLS = ["ETH", "SOL", "AVAX", "POL", "ARB", "OP", "USDC", "LTC", "BTC"];
 
 export function registerInteractionHandler(client: Client): void {
   client.on("interactionCreate", async (interaction: Interaction) => {
     if (interaction.isChatInputCommand()) {
-      await handleCommand(interaction);
+      await withComponentsV2(interaction, () => handleCommand(interaction));
     } else if (interaction.isButton()) {
-      await handleButton(interaction);
+      await withComponentsV2(interaction, () => handleButton(interaction));
     }
   });
 }
@@ -48,6 +50,19 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   recordUsage(interaction.user.id, "command");
 
   try {
+    await userRepo.findOrCreateUser(interaction.user.id);
+    if (!(await userRepo.hasCurrentConsent(interaction.user.id))) {
+      if (!config.dashboard.baseUrl || !config.dashboard.legalDocumentsApproved || (process.env.NODE_ENV === "production" && !config.dashboard.baseUrl.startsWith("https://"))) {
+        await interaction.reply({ content: "Crypto is not ready to collect consent. The operator must configure APP_BASE_URL, publish reviewed Privacy Policy and Terms, and set LEGAL_DOCUMENTS_APPROVED=true.", ephemeral: true });
+        return;
+      }
+      await interaction.reply({
+        content: consentPrompt(),
+        components: [consentActionRow()],
+        ephemeral: true,
+      });
+      return;
+    }
     await command.execute(interaction);
   } catch (err) {
     logger.error(
@@ -63,17 +78,52 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
   }
 }
 
+function consentPrompt(): string {
+  const base = config.dashboard.baseUrl;
+  const legalLinks = base
+    ? `Read the [Privacy Policy](${base}/privacy) and [Terms of Service](${base}/terms).`
+    : "Privacy and Terms pages will be available after APP_BASE_URL is configured.";
+  return `Before using Crypto, please review and accept the Privacy Policy and Terms. ${legalLinks}\n` +
+    `Acceptance version: ${config.dashboard.termsVersion}. You can decline; no tipping commands will run until you accept.`;
+}
+
 async function handleButton(interaction: ButtonInteraction): Promise<void> {
   const id = interaction.customId;
+
+  if (id === "tipx:consent:accept") {
+    await userRepo.findOrCreateUser(interaction.user.id);
+    await userRepo.acceptCurrentTerms(interaction.user.id);
+    await interaction.reply({ content: "Thanks — your acceptance is recorded. You can now use Crypto.", ephemeral: true });
+    if (config.dashboard.baseUrl) {
+      try {
+        await interaction.user.send(
+          `Your Crypto account dashboard is ready: ${config.dashboard.baseUrl}/auth/discord\n` +
+          "Sign in with Discord (identify-only access) to create your one-time recovery key. Keep that key offline; it is required to decrypt your recovery backup.",
+        );
+      } catch {
+        await interaction.followUp({
+          content: `I couldn't DM you. Open your dashboard when DMs are enabled: ${config.dashboard.baseUrl}/auth/discord`,
+          ephemeral: true,
+        });
+      }
+    }
+    return;
+  }
+  if (id === "tipx:consent:decline") {
+    await userRepo.findOrCreateUser(interaction.user.id);
+    await userRepo.declineCurrentTerms(interaction.user.id);
+    await interaction.reply({ content: "You declined the Privacy Policy and Terms. Crypto commands remain disabled until you accept.", ephemeral: true });
+    return;
+  }
 
   // Airdrop claim buttons are handled by the airdrop command itself
   if (id.startsWith("airdrop_claim:")) return;
 
-  if (!id.startsWith("hodlr:")) return;
+  if (!id.startsWith("tipx:") && !id.startsWith("hodlr:")) return;
 
   await interaction.deferReply({ ephemeral: true });
 
-  const action = id.slice("hodlr:".length);
+  const action = id.slice(id.indexOf(":") + 1);
 
   try {
     switch (action) {
@@ -258,7 +308,7 @@ async function btnPrices(interaction: ButtonInteraction): Promise<void> {
       brandEmbed()
         .setTitle(`${EMOJIS.price} Prices`)
         .setDescription(lines.join("\n") || "No price data available.")
-        .setFooter({ text: "Powered by CoinGecko · Hodlr" }),
+        .setFooter({ text: "Powered by CoinGecko · Crypto" }),
     ],
   });
 }
@@ -271,7 +321,7 @@ async function btnHelp(interaction: ButtonInteraction): Promise<void> {
         .addFields(
           { name: `${EMOJIS.tip} Tipping`, value: `\`${PREFIX}tip\`  \`${PREFIX}rain\`  \`${PREFIX}airdrop\``, inline: false },
           { name: `${EMOJIS.wallet} Wallet`, value: `\`${PREFIX}deposit\`  \`${PREFIX}withdraw\`  \`${PREFIX}balance\`  \`${PREFIX}wallet\``, inline: false },
-          { name: `${EMOJIS.history} Info`, value: `\`${PREFIX}leaderboard\`  \`${PREFIX}price\`  \`${PREFIX}hodlr\``, inline: false },
+          { name: `${EMOJIS.history} Info`, value: `\`${PREFIX}leaderboard\`  \`${PREFIX}price\`  \`${PREFIX}crypto\``, inline: false },
           { name: `⚙️ Settings`, value: `\`${PREFIX}network\`  \`${PREFIX}config\``, inline: false },
           { name: "Details", value: `Run \`${PREFIX}help <command>\` for full usage.`, inline: false },
         ),

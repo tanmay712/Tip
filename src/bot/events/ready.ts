@@ -3,7 +3,7 @@ import { logger } from "../../utils/logger.js";
 
 export function registerEvents(client: Client): void {
   client.once("ready", (c) => {
-    logger.info(`Hodlr is online as ${c.user.tag} — serving ${c.guilds.cache.size} guilds`);
+    logger.info(`Crypto is online as ${c.user.tag} — serving ${c.guilds.cache.size} guilds`);
   });
 
   client.on("error", (err) => {

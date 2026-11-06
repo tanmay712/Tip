@@ -6,7 +6,7 @@ import { startDepositPoller } from "./core/deposit.service.js";
 import { logger } from "./utils/logger.js";
 
 async function main(): Promise<void> {
-  logger.info("Starting Hodlr...");
+  logger.info("Starting Crypto...");
 
   await connectDatabase();
   logger.info("Database connected");
@@ -19,11 +19,11 @@ async function main(): Promise<void> {
 
   await startBot();
 
-  logger.info("Hodlr is fully operational");
+  logger.info("Crypto is fully operational");
 }
 
 main().catch((err) => {
-  logger.fatal({ err }, "Failed to start Hodlr");
+  logger.fatal({ err }, "Failed to start Crypto");
   process.exit(1);
 });
 

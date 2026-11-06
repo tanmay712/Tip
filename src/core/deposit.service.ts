@@ -5,9 +5,11 @@ import { prisma } from "../database/client.js";
 import { getChain, CHAIN_IDS, getExplorerTxUrl } from "../blockchain/chains.js";
 import { getAlchemy } from "../blockchain/alchemy.js";
 import { getSolanaConnection } from "../blockchain/solana.js";
+import { getLitecoinTransactions, getLitecoinTransaction, isLitecoinConfigured } from "../blockchain/litecoin.js";
 import { TXN_TYPES, LIMITS, SECURITY_LIMITS } from "../utils/constants.js";
 import { formatTokenAmount } from "../utils/format.js";
 import { logger } from "../utils/logger.js";
+import { config } from "../config.js";
 import { logSecurityEvent } from "../utils/security.js";
 import type { AlchemyWebhookEvent } from "../blockchain/webhooks.js";
 import { dmUser, logToAllChannels } from "../bot/notifications.js";
@@ -47,7 +49,7 @@ async function notifyDeposit(params: {
       { name: "🌐 Network", value: networkLabel, inline: true },
       { name: "🔗 Transaction", value: `[View on Explorer](${txUrl})`, inline: false },
     )
-    .setFooter({ text: "Hodlr" });
+    .setFooter({ text: "Crypto" });
 
   await dmUser(prismaUser.discordId, [embed]);
 
@@ -387,20 +389,124 @@ async function pollSolanaChain(isTestnet: boolean): Promise<void> {
   }
 }
 
+let warnedLitecoinProviderMissing = false;
+async function pollLitecoinChain(isTestnet: boolean): Promise<void> {
+  if (!isLitecoinConfigured()) {
+    if (!warnedLitecoinProviderMissing) {
+      logger.warn("Litecoin deposit polling is disabled; configure LITECOIN_API_TOKEN");
+      warnedLitecoinProviderMissing = true;
+    }
+    return;
+  }
+  const pendingWithdrawals = await prisma.transaction.findMany({
+    where: { chain: "litecoin", token: "native", isTestnet, type: TXN_TYPES.WITHDRAW, status: "pending", txHash: { not: null } },
+    select: { id: true, txHash: true },
+  });
+  for (const withdrawal of pendingWithdrawals as Array<{ id: string; txHash: string | null }>) {
+    if (!withdrawal.txHash) continue;
+    try {
+      const transaction = await getLitecoinTransaction(withdrawal.txHash, isTestnet);
+      if (transaction.hash?.toLowerCase() === withdrawal.txHash.toLowerCase() && (transaction.confirmations ?? 0) >= 1) {
+        await txRepo.updateTransactionStatus(withdrawal.id, "completed", withdrawal.txHash);
+        logger.info({ txHash: withdrawal.txHash, isTestnet }, "Litecoin withdrawal confirmed");
+      }
+    } catch (err) {
+      logger.warn({ err, txHash: withdrawal.txHash, isTestnet }, "Could not verify pending Litecoin withdrawal");
+    }
+  }
+
+  const wallets = await walletRepo.getWalletsByChain("litecoin", isTestnet);
+  if (wallets.length === 0) return;
+
+  for (const wallet of wallets) {
+    try {
+      const transactions = await getLitecoinTransactions(wallet.address, isTestnet);
+      for (const transaction of transactions) {
+        if (!/^[0-9a-f]{64}$/i.test(transaction.hash ?? "")) continue;
+        const txHash = transaction.hash.toLowerCase();
+        if (!Number.isSafeInteger(transaction.confirmations) || (transaction.confirmations ?? 0) < config.litecoin.confirmations) continue;
+        const rawAmount = (transaction.outputs ?? []).reduce((sum, output) => {
+          const sentToWallet = output.addresses?.some((address) => address === wallet.address);
+          if (!sentToWallet || !Number.isSafeInteger(output.value) || (output.value ?? 0) <= 0) return sum;
+          return sum + BigInt(output.value!);
+        }, 0n);
+        if (rawAmount <= 0n) continue;
+
+        const existing = await txRepo.findTransactionByTxHash({
+          txHash,
+          type: TXN_TYPES.DEPOSIT,
+          chain: "litecoin",
+          isTestnet,
+          receiverId: wallet.userId,
+        });
+        if (existing) continue;
+
+        const minRaw = SECURITY_LIMITS.minDepositRaw.litecoin;
+        if (minRaw && rawAmount < BigInt(minRaw)) continue;
+        const amount = rawAmount.toString();
+        await txRepo.createTransaction({
+          type: TXN_TYPES.DEPOSIT,
+          receiverId: wallet.userId,
+          chain: "litecoin",
+          token: "native",
+          tokenSymbol: "LTC",
+          amount,
+          txHash,
+          isTestnet,
+          status: "completed",
+        });
+        const largeRaw = SECURITY_LIMITS.largeDepositRaw.litecoin;
+        const isLarge = largeRaw ? rawAmount >= BigInt(largeRaw) : false;
+        logSecurityEvent({
+          type: isLarge ? "LARGE_DEPOSIT" : "DEPOSIT_CREDITED",
+          chainId: "litecoin",
+          amount,
+          decimals: 8,
+          tokenSymbol: "LTC",
+          txHash,
+          isTestnet,
+          extra: { address: wallet.address, confirmations: transaction.confirmations ?? 0 },
+        });
+        notifyDeposit({
+          userId: wallet.userId,
+          chainId: "litecoin",
+          tokenSymbol: "LTC",
+          rawAmount: amount,
+          decimals: 8,
+          txHash,
+          isTestnet,
+        }).catch(() => {});
+        logger.info({ address: wallet.address, txHash, amount }, "LTC deposit credited after confirmations");
+      }
+    } catch (err) {
+      logger.error({ err, address: wallet.address, isTestnet }, "Litecoin deposit poll failed for wallet");
+    }
+  }
+}
+
+let depositPollRunning = false;
 async function runPoll(): Promise<void> {
-  for (const isTestnet of [false, true]) {
-    for (const chainId of CHAIN_IDS) {
-      const chain = getChain(chainId);
-      try {
-        if (chain.type === "solana") {
-          await pollSolanaChain(isTestnet);
-        } else {
-          await pollEvmChain(chainId, isTestnet);
+  if (depositPollRunning) return;
+  depositPollRunning = true;
+  try {
+    for (const isTestnet of [false, true]) {
+      for (const chainId of CHAIN_IDS) {
+        const chain = getChain(chainId);
+        try {
+          if (chain.type === "solana") {
+            await pollSolanaChain(isTestnet);
+          } else if (chain.type === "litecoin") {
+            await pollLitecoinChain(isTestnet);
+          } else {
+            await pollEvmChain(chainId, isTestnet);
+          }
+        } catch (err) {
+          logger.error({ err, chain: chainId, isTestnet }, "Chain deposit poll failed");
         }
-      } catch (err) {
-        logger.error({ err, chain: chainId, isTestnet }, "Chain deposit poll failed");
       }
     }
+  } finally {
+    depositPollRunning = false;
   }
 }
 

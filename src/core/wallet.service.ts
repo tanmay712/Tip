@@ -6,6 +6,8 @@ import { getChain, CHAIN_IDS } from "../blockchain/chains.js";
 import * as walletRepo from "../database/repositories/wallet.repo.js";
 import * as userRepo from "../database/repositories/user.repo.js";
 import { logger } from "../utils/logger.js";
+import { config } from "../config.js";
+import { deriveLitecoinWallet, isLitecoinConfigured } from "../blockchain/litecoin.js";
 
 function deriveEvmWallet(seed: Buffer): { address: string; privateKey: string } {
   const hdNode = ethers.HDNodeWallet.fromSeed(seed);
@@ -25,15 +27,20 @@ export async function getOrCreateWallet(
   discordId: string,
   chainId: string,
   isTestnet: boolean,
-): Promise<{ address: string; chain: string; isNew: boolean; newPrivateKey?: string }> {
+): Promise<{ address: string; chain: string }> {
   const user = await userRepo.findOrCreateUser(discordId);
   const existing = await walletRepo.getWallet(user.id, chainId, isTestnet);
   if (existing) {
-    return { address: existing.address, chain: chainId, isNew: false };
+    return { address: existing.address, chain: chainId };
   }
 
   const chain = getChain(chainId);
-  const seed = crypto.createHash("sha512")
+  if (chain.type === "litecoin" && !isLitecoinConfigured()) {
+    throw new Error("Litecoin wallets are disabled until the operator configures a hosted provider");
+  }
+  // The database user ID is public/guessable; deriving from it alone would let anyone
+  // recreate every wallet. Key derivation is now bound to the server's high-entropy secret.
+  const seed = crypto.createHmac("sha512", Buffer.from(config.encryption.secret, "hex"))
     .update(`${user.id}:${chainId}:${isTestnet}`)
     .digest();
 
@@ -42,6 +49,10 @@ export async function getOrCreateWallet(
 
   if (chain.type === "solana") {
     const result = deriveSolanaWallet(seed);
+    address = result.address;
+    privateKey = result.privateKey;
+  } else if (chain.type === "litecoin") {
+    const result = deriveLitecoinWallet(seed, isTestnet);
     address = result.address;
     privateKey = result.privateKey;
   } else {
@@ -54,13 +65,13 @@ export async function getOrCreateWallet(
   await walletRepo.createWallet({
     userId: user.id,
     chain: chainId,
-    address: address.toLowerCase(),
+    address: chain.type === "evm" ? address.toLowerCase() : address,
     encryptedKey,
     isTestnet,
   });
 
   logger.info({ discordId, chain: chainId, isTestnet }, "Wallet created");
-  return { address, chain: chainId, isNew: true, newPrivateKey: privateKey };
+  return { address, chain: chainId };
 }
 
 export async function getAllWallets(discordId: string, isTestnet: boolean) {
@@ -69,12 +80,14 @@ export async function getAllWallets(discordId: string, isTestnet: boolean) {
 
   const existingChains = new Set(wallets.map((w: { chain: string }) => w.chain));
   for (const chainId of CHAIN_IDS) {
+    if (chainId === "litecoin" && !isLitecoinConfigured()) continue;
     if (!existingChains.has(chainId)) {
       await getOrCreateWallet(discordId, chainId, isTestnet);
     }
   }
 
-  return walletRepo.getUserWallets(user.id, isTestnet);
+  const allWallets = await walletRepo.getUserWallets(user.id, isTestnet);
+  return isLitecoinConfigured() ? allWallets : allWallets.filter((wallet: { chain: string }) => wallet.chain !== "litecoin");
 }
 
 export function getPrivateKey(encryptedKey: string): string {

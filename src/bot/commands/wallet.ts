@@ -7,13 +7,14 @@ import * as userRepo from "../../database/repositories/user.repo.js";
 import { CHAIN_IDS, getChain } from "../../blockchain/chains.js";
 import { findToken } from "../../blockchain/tokens.js";
 import { parseTokenAmount } from "../../utils/format.js";
+import { isLitecoinAddress, isLitecoinConfigured } from "../../blockchain/litecoin.js";
 import { walletEmbed, withdrawEmbed, brandEmbed, errorEmbed } from "../components/embeds.js";
 import { EMOJIS } from "../../utils/constants.js";
 import type { BotCommand } from "../client.js";
 
 const data = new SlashCommandBuilder()
   .setName("wallet")
-  .setDescription("Manage your Hodlr wallets")
+  .setDescription("Manage your Crypto wallets")
   .addSubcommand((sub) =>
     sub.setName("view").setDescription("View all your wallet addresses"),
   )
@@ -88,6 +89,10 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
 
   if (sub === "deposit") {
     const chainId = interaction.options.getString("chain", true);
+    if (chainId === "litecoin" && !isLitecoinConfigured()) {
+      await interaction.editReply({ embeds: [errorEmbed("Litecoin deposits are disabled until the operator sets LITECOIN_API_TOKEN.")] });
+      return;
+    }
     const { address } = await getOrCreateWallet(interaction.user.id, chainId, isTestnet);
     const embed = walletEmbed({ chain: chainId, address, isTestnet });
     embed.setDescription(
@@ -103,6 +108,10 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     const amount = interaction.options.getNumber("amount", true);
     const tokenSymbol = interaction.options.getString("token", true).toUpperCase();
     const chain = getChain(chainId);
+    if (chain.type === "litecoin" && !isLitecoinConfigured()) {
+      await interaction.editReply({ embeds: [errorEmbed("Litecoin withdrawals are disabled until the operator sets LITECOIN_API_TOKEN.")] });
+      return;
+    }
 
     if (chain.type === "solana") {
       try {
@@ -111,11 +120,14 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
         await interaction.editReply({ embeds: [errorEmbed("Invalid Solana address")] });
         return;
       }
-    } else {
-      if (!ethers.isAddress(toAddress)) {
-        await interaction.editReply({ embeds: [errorEmbed("Invalid EVM address")] });
+    } else if (chain.type === "litecoin") {
+      if (!isLitecoinAddress(toAddress, isTestnet)) {
+        await interaction.editReply({ embeds: [errorEmbed("Invalid Litecoin address for the selected network")] });
         return;
       }
+    } else if (!ethers.isAddress(toAddress)) {
+      await interaction.editReply({ embeds: [errorEmbed("Invalid EVM address")] });
+      return;
     }
 
     let token = "native";
@@ -159,6 +171,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
           tokenSymbol,
           toAddress,
           isTestnet,
+          networkFee: result.networkFee,
         }),
       ],
     });

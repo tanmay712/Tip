@@ -1,5 +1,5 @@
 /**
- * Admin commands for Hodlr.
+ * Admin commands for Crypto.
  *
  * Usage: $admin <subcommand> [args]
  *
@@ -120,7 +120,7 @@ async function adminBan(message: Message, args: string[]): Promise<void> {
     embeds: [
       successEmbed(
         "User Banned",
-        `**${target.username}** has been banned from using Hodlr.` +
+        `**${target.username}** has been banned from using Crypto.` +
           (reason ? `\nReason: ${reason}` : ""),
       ),
     ],
@@ -131,7 +131,7 @@ async function adminBan(message: Message, args: string[]): Promise<void> {
     await target.send({
       embeds: [
         errorEmbed(
-          `You have been banned from using **Hodlr** in **${message.guild?.name ?? "a server"}**.` +
+          `You have been banned from using **Crypto** in **${message.guild?.name ?? "a server"}**.` +
             (reason ? `\nReason: ${reason}` : ""),
         ),
       ],
@@ -162,7 +162,7 @@ async function adminUnban(message: Message, args: string[]): Promise<void> {
   logger.info({ unbannedUser: target.id, unbannedBy: message.author.id }, "User unbanned");
 
   await message.reply({
-    embeds: [successEmbed("User Unbanned", `**${target.username}** can now use Hodlr again.`)],
+    embeds: [successEmbed("User Unbanned", `**${target.username}** can now use Crypto again.`)],
   });
 }
 
@@ -228,7 +228,7 @@ async function adminBroadcast(message: Message, args: string[]): Promise<void> {
   const broadcastEmbed = brandEmbed()
     .setTitle(`${EMOJIS.warning} Announcement`)
     .setDescription(text)
-    .setFooter({ text: `Broadcast from ${message.guild?.name ?? "Hodlr Admin"} · Hodlr` });
+    .setFooter({ text: `Broadcast from ${message.guild?.name ?? "Crypto Admin"} · Crypto` });
 
   for (const u of allUsers) {
     try {
@@ -266,7 +266,7 @@ async function adminLogchannel(message: Message, args: string[]): Promise<void> 
   if (arg === "off" || arg === "none" || arg === "disable") {
     await configRepo.setLogChannel(message.guild.id, null);
     await message.reply({
-      embeds: [successEmbed("Log Channel Disabled", "Hodlr will no longer log activity to a channel.")],
+      embeds: [successEmbed("Log Channel Disabled", "Crypto will no longer log activity to a channel.")],
     });
     return;
   }
@@ -288,7 +288,7 @@ async function adminLogchannel(message: Message, args: string[]): Promise<void> 
     embeds: [
       successEmbed(
         "Log Channel Set",
-        `All Hodlr activity will be logged to ${mentioned}.`,
+        `All Crypto activity will be logged to ${mentioned}.`,
       ),
     ],
   });
@@ -307,7 +307,7 @@ async function adminStats(message: Message): Promise<void> {
   await message.reply({
     embeds: [
       brandEmbed()
-        .setTitle(`${EMOJIS.leaderboard} Hodlr Stats`)
+        .setTitle(`${EMOJIS.leaderboard} Crypto Stats`)
         .addFields(
           { name: "👥 Users", value: `**${userCount.toLocaleString()}**`, inline: true },
           { name: "👛 Wallets", value: `**${walletCount.toLocaleString()}**`, inline: true },
