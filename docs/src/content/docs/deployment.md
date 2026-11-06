@@ -1,6 +1,6 @@
 ---
 title: Deployment
-description: Deploy Hodlr with Docker, Railway, or manually
+description: Deploy Crypto with Docker, Railway, or manually
 ---
 
 ## Docker
@@ -40,6 +40,7 @@ docker run -d \
    - `DISCORD_CLIENT_ID`
    - `ALCHEMY_API_KEY`
    - `ENCRYPTION_SECRET` — generate: `openssl rand -hex 32`
+   - To enable Litecoin, set `LITECOIN_API_TOKEN` and optionally `LITECOIN_API_BASE_URL`; see the Litecoin section in [Supported Chains](/chains/).
 3. For persistence: add a Volume mounted at `/app/data` (SQLite), or add the **PostgreSQL** plugin and set `DATABASE_URL`
 4. Deploy — Railway uses `railway.toml` and the included `Dockerfile` automatically
 

@@ -6,7 +6,7 @@ import type { BotCommand } from "../client.js";
 
 const data = new SlashCommandBuilder()
   .setName("help")
-  .setDescription("Learn how to use Hodlr")
+  .setDescription("Learn how to use Crypto")
   .addStringOption((opt) =>
     opt
       .setName("command")
@@ -21,6 +21,13 @@ const data = new SlashCommandBuilder()
         { name: "leaderboard", value: "leaderboard" },
         { name: "price", value: "price" },
         { name: "network", value: "network" },
+        { name: "account", value: "account" },
+        { name: "owner", value: "owner" },
+        { name: "settings", value: "settings" },
+        { name: "server", value: "server" },
+        { name: "transactions", value: "transactions" },
+        { name: "assets", value: "assets" },
+        { name: "security", value: "security" },
       ),
   );
 
@@ -68,6 +75,34 @@ const COMMAND_HELP: Record<string, { usage: string; description: string }> = {
     description:
       "Switch between mainnet and testnet. Use testnet to try things out risk-free.",
   },
+  account: {
+    usage: "/account status|dashboard|privacy",
+    description: "Review your consent and recovery setup, or open the authenticated dashboard.",
+  },
+  owner: {
+    usage: "/owner stats|user-lookup|user-ban|user-unban",
+    description: "Operator controls limited to OWNER_DISCORD_IDS configured by the deployment owner.",
+  },
+  settings: {
+    usage: "/settings status|notifications-on|notifications-off|mainnet|testnet",
+    description: "Control network defaults and optional direct-message notifications.",
+  },
+  server: {
+    usage: "/server status|log-channel-set|log-channel-clear|admin-role-set",
+    description: "Configure Crypto server logging and admin roles (Manage Server required).",
+  },
+  transactions: {
+    usage: "/transactions recent|lookup|summary|deposits|withdrawals|tips",
+    description: "Review only your own transaction records and summaries.",
+  },
+  assets: {
+    usage: "/assets list|lookup|native-prices",
+    description: "Inspect configured native assets, token contracts, and prices.",
+  },
+  security: {
+    usage: "/security status|dashboard|backup-guide|privacy",
+    description: "Check security setup and access authenticated recovery tools.",
+  },
 };
 
 async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -96,7 +131,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
 
   const embed = brandEmbed()
     .setTitle(`${BRAND.name} — ${BRAND.tagline}`)
-    .setDescription("A modern crypto tipping bot supporting 8 chains, testnet & mainnet.")
+    .setDescription("A crypto tipping bot supporting EVM, Solana, and Litecoin networks with mainnet & testnet.")
     .addFields(
       {
         name: `${EMOJIS.tip} Tipping`,
@@ -115,7 +150,17 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
       },
       {
         name: `${EMOJIS.network} Settings`,
-        value: "`/network` `/help`",
+        value: "`/network` `/settings` `/server`",
+        inline: true,
+      },
+      {
+        name: "Account & Security",
+        value: "`/account` `/security` `/transactions` `/assets`",
+        inline: true,
+      },
+      {
+        name: "Owner operations",
+        value: "`/owner` (allowlisted operators only)",
         inline: true,
       },
       {

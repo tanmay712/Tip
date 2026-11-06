@@ -1,6 +1,6 @@
 ---
 title: Getting Started
-description: Set up Hodlr in your Discord server
+description: Set up Crypto in your Discord server
 ---
 
 ## Prerequisites
@@ -12,8 +12,8 @@ description: Set up Hodlr in your Discord server
 ## Installation
 
 ```bash
-git clone https://github.com/HiLleywyn/hodlr.git
-cd hodlr
+git clone https://github.com/tanmay712/Tip.git
+cd Tip
 npm install
 cp .env.example .env
 ```

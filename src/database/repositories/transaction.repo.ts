@@ -15,11 +15,16 @@ export async function createTransaction(data: {
   return prisma.transaction.create({ data });
 }
 
+export async function updateTransactionStatus(id: string, status: string, txHash?: string): Promise<void> {
+  await prisma.transaction.update({ where: { id }, data: { status, ...(txHash ? { txHash } : {}) } });
+}
+
 export async function findTransactionByTxHash(params: {
   txHash: string;
   type: string;
   chain: string;
   isTestnet: boolean;
+  receiverId?: string;
 }) {
   return prisma.transaction.findFirst({
     where: {
@@ -27,6 +32,7 @@ export async function findTransactionByTxHash(params: {
       type: params.type,
       chain: params.chain,
       isTestnet: params.isTestnet,
+      ...(params.receiverId ? { receiverId: params.receiverId } : {}),
     },
     select: { id: true },
   });
@@ -68,18 +74,18 @@ export async function getUserBalance(
   });
 
   const sentTxns = await prisma.transaction.findMany({
-    where: { senderId: userId, chain, token, isTestnet, status: "completed" },
+    where: { senderId: userId, chain, token, isTestnet, status: { in: ["completed", "pending"] } },
     select: { amount: true },
   });
 
-  const totalReceived = receivedTxns.reduce(
-    (sum: bigint, t: { amount: string }) => sum + BigInt(t.amount),
-    0n,
-  );
-  const totalSent = sentTxns.reduce(
-    (sum: bigint, t: { amount: string }) => sum + BigInt(t.amount),
-    0n,
-  );
+  let totalReceived = 0n;
+  for (const transaction of receivedTxns as Array<{ amount: string }>) {
+    totalReceived += BigInt(transaction.amount);
+  }
+  let totalSent = 0n;
+  for (const transaction of sentTxns as Array<{ amount: string }>) {
+    totalSent += BigInt(transaction.amount);
+  }
   return totalReceived - totalSent;
 }
 

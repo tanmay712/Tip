@@ -14,6 +14,13 @@ export async function deployCommands(): Promise<void> {
     import("./commands/price.js"),
     import("./commands/network.js"),
     import("./commands/help.js"),
+    import("./commands/owner.js"),
+    import("./commands/account.js"),
+    import("./commands/settings.js"),
+    import("./commands/server.js"),
+    import("./commands/transactions.js"),
+    import("./commands/assets.js"),
+    import("./commands/security.js"),
   ]);
 
   const commands = commandModules.map((mod) => {

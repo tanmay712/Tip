@@ -12,6 +12,7 @@ export function getEvmProvider(
   let provider = providers.get(key);
   if (!provider) {
     const net = getNetworkConfig(chainId, isTestnet);
+    if (!net.rpcSuffix) throw new Error(`${chainId} does not use an Alchemy EVM RPC provider`);
     const url = `https://${net.rpcSuffix}.g.alchemy.com/v2/${config.alchemy.apiKey}`;
     provider = new ethers.JsonRpcProvider(url);
     providers.set(key, provider);

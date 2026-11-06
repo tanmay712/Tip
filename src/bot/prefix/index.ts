@@ -8,7 +8,7 @@ import * as txRepo from "../../database/repositories/transaction.repo.js";
 import * as airdropRepo from "../../database/repositories/airdrop.repo.js";
 import * as configRepo from "../../database/repositories/config.repo.js";
 import { handleAdminCommand } from "./admin.js";
-import { getOrCreateWallet, getAllWallets, getPrivateKey } from "../../core/wallet.service.js";
+import { getOrCreateWallet, getAllWallets } from "../../core/wallet.service.js";
 import { dmUserIfEnabled, logToChannel } from "../notifications.js";
 import { activeClient } from "../client.js";
 import { checkRateLimit, recordUsage, formatRetryAfter, type RateLimitAction } from "../../utils/rate-limit.js";
@@ -21,6 +21,7 @@ import { withdraw } from "../../core/withdraw.service.js";
 import { createAirdrop, claimAirdrop } from "../../core/airdrop.service.js";
 import * as alchemyApi from "../../blockchain/alchemy.js";
 import { getSolBalance } from "../../blockchain/solana.js";
+import { isLitecoinAddress, isLitecoinConfigured } from "../../blockchain/litecoin.js";
 import { parseTokenAmount, formatTokenAmount, formatUsd } from "../../utils/format.js";
 import {
   tipEmbed,
@@ -41,8 +42,10 @@ import {
   withdrawActionRow,
   hodlrMenuRow1,
   hodlrMenuRow2,
+  consentActionRow,
 } from "../components/buttons.js";
 import { BRAND, EMOJIS, PREFIX, LIMITS } from "../../utils/constants.js";
+import { config } from "../../config.js";
 
 const MEDALS = ["🥇", "🥈", "🥉"];
 
@@ -97,12 +100,20 @@ const COMMAND_HELP: Record<string, { usage: string; description: string }> = {
     description: "Toggle DM notifications for tips, rain, airdrops, and deposits.",
   },
   privatekey: {
-    usage: `${PREFIX}privatekey <chain>`,
-    description: "Export your private key for a chain. DMs only — type CONFIRM when prompted.",
+    usage: `${PREFIX}privatekey`,
+    description: "Legacy alias for the authenticated encrypted recovery dashboard; keys are never sent in chat.",
+  },
+  crypto: {
+    usage: `${PREFIX}crypto`,
+    description: "Crypto overview, stats, and quick-action buttons.",
+  },
+  tipx: {
+    usage: `${PREFIX}tipx`,
+    description: "Legacy alias for the Crypto overview.",
   },
   hodlr: {
     usage: `${PREFIX}hodlr`,
-    description: "Bot overview, stats, and quick-action buttons.",
+    description: "Legacy alias for the Crypto overview.",
   },
 };
 
@@ -191,12 +202,32 @@ export async function handlePrefixCommand(message: Message): Promise<void> {
     recordUsage(message.author.id, "command");
   }
 
+  await userRepo.findOrCreateUser(message.author.id);
+  if (!(await userRepo.hasCurrentConsent(message.author.id))) {
+    const baseUrl = config.dashboard.baseUrl;
+    if (!baseUrl || !config.dashboard.legalDocumentsApproved || (process.env.NODE_ENV === "production" && !baseUrl.startsWith("https://"))) {
+      await message.reply("Crypto is not ready to collect consent. The operator must configure APP_BASE_URL, publish reviewed Privacy Policy and Terms, and set LEGAL_DOCUMENTS_APPROVED=true.");
+      return;
+    }
+    const legal = `Review the Privacy Policy (${baseUrl}/privacy) and Terms (${baseUrl}/terms). `;
+    try {
+      await message.author.send({
+        content: `${legal}Accept to enable Crypto commands, or decline to leave the service disabled.`,
+        components: [consentActionRow()],
+      });
+      await message.reply("Please check your DMs to review Crypto's Privacy Policy and Terms before using commands.");
+    } catch {
+      await message.reply("Crypto needs your consent before it can run commands. Enable DMs and retry, or use a slash command to review the consent prompt privately.");
+    }
+    return;
+  }
+
   // Check if user is banned (skip admin commands so admins can unban)
   if (cmd !== "admin") {
     try {
       const banned = await configRepo.isUserBanned(message.author.id);
       if (banned) {
-        await message.reply({ embeds: [errorEmbed("You have been banned from using Hodlr.")] });
+        await message.reply({ embeds: [errorEmbed("You have been banned from using Crypto.")] });
         return;
       }
     } catch {
@@ -218,7 +249,9 @@ export async function handlePrefixCommand(message: Message): Promise<void> {
     case "withdraw":    return handleWithdrawAlias(message, args);
     case "deposit":     return handleDepositAlias(message, args);
     // extras
-    case "hodlr":         return handleHodlr(message);
+    case "crypto":
+    case "tipx": // backwards-compatible alias
+    case "hodlr":         return handleCrypto(message);
     case "config":        return handleConfig(message);
     case "notifications": return handleNotifications(message, args);
     case "privatekey":    return handlePrivateKey(message, args);
@@ -282,7 +315,7 @@ async function handleHelp(message: Message, args: string[]): Promise<void> {
           },
           {
             name: `${EMOJIS.history} Info`,
-            value: `\`${PREFIX}leaderboard\`  \`${PREFIX}price\`  \`${PREFIX}hodlr\``,
+            value: `\`${PREFIX}leaderboard\`  \`${PREFIX}price\`  \`${PREFIX}crypto\``,
             inline: false,
           },
           {
@@ -448,7 +481,7 @@ async function handleTip(message: Message, args: string[]): Promise<void> {
         .setDescription(
           `<@${message.author.id}> sent you **${formattedPer} ${tokenSymbol}** on ${chain.emoji} **${chain.name}** ${networkLabel}`,
         )
-        .setFooter({ text: `Use ${PREFIX}balance to check your balance · Hodlr` }),
+        .setFooter({ text: `Use ${PREFIX}balance to check your balance · Crypto` }),
     ]).catch(() => {});
     void targetUser;
   }
@@ -476,12 +509,16 @@ async function handleBalance(message: Message, args: string[]): Promise<void> {
 
   if (specificChain) {
     const chain = getChain(specificChain);
-    const { address } = await getOrCreateWallet(message.author.id, specificChain, isTestnet);
+    const address = chain.type === "litecoin"
+      ? ""
+      : (await getOrCreateWallet(message.author.id, specificChain, isTestnet)).address;
     const balances: Array<{ symbol: string; amount: string; decimals: number }> = [];
 
     let nativeBalance: string;
     if (chain.type === "solana") {
       nativeBalance = await getSolBalance(address, isTestnet);
+    } else if (chain.type === "litecoin") {
+      nativeBalance = "0"; // Report the pooled internal liability, never add backing UTXOs twice.
     } else {
       nativeBalance = await alchemyApi.getBalance(specificChain, address, isTestnet);
     }
@@ -492,7 +529,9 @@ async function handleBalance(message: Message, args: string[]): Promise<void> {
       "native",
       isTestnet,
     );
-    const totalNative = (BigInt(nativeBalance) + internalBalance).toString();
+    const totalNative = chain.type === "litecoin"
+      ? internalBalance.toString()
+      : (BigInt(nativeBalance) + internalBalance).toString();
     balances.push({
       symbol: chain.nativeToken,
       amount: totalNative,
@@ -628,7 +667,7 @@ async function handlePrice(message: Message, args: string[]): Promise<void> {
           { name: "Price (USD)", value: `**${formatUsd(info.price)}**`, inline: true },
           { name: `${changeEmoji} 24h Change`, value: `**${changeStr}**`, inline: true },
         )
-        .setFooter({ text: "Powered by CoinGecko · Hodlr" }),
+        .setFooter({ text: "Powered by CoinGecko · Crypto" }),
     ],
   });
 }
@@ -692,6 +731,12 @@ async function handleDepositFlow(message: Message, args: string[]): Promise<void
     return;
   }
 
+  if (chainId === "litecoin" && !isLitecoinConfigured()) {
+    const errEmbed = errorEmbed("Litecoin deposits are disabled until the operator sets LITECOIN_API_TOKEN.");
+    if (shouldRedirect) await message.author.send({ embeds: [errEmbed] }).catch(() => {});
+    else await message.reply({ embeds: [errEmbed] });
+    return;
+  }
   const network = await userRepo.getUserNetwork(message.author.id);
   const isTestnet = network === "testnet";
   const result = await getOrCreateWallet(message.author.id, chainId, isTestnet);
@@ -706,25 +751,8 @@ async function handleDepositFlow(message: Message, args: string[]): Promise<void
     await message.reply({ embeds: [embed], components: [depositActionRow()] });
   }
 
-  // If this is a newly created wallet, DM the private key to the user
-  if (result.isNew && result.newPrivateKey) {
-    const chain = getChain(chainId);
-    await message.author
-      .send({
-        embeds: [
-          brandEmbed()
-            .setColor(0xff4444)
-            .setTitle(`🔑 New ${chain.emoji} ${chain.name} Wallet Created`)
-            .setDescription(
-              `Save this private key somewhere safe. It will not be shown again.\n\n` +
-                `\`\`\`\n${result.newPrivateKey}\n\`\`\`\n` +
-                `**Never share this with anyone.** Use \`${PREFIX}privatekey ${chainId}\` to export it again.`,
-            )
-            .setFooter({ text: "Keep this secret — Hodlr" }),
-        ],
-      })
-      .catch(() => {});
-  }
+  // Never send a raw signing key through Discord. Use the encrypted recovery dashboard.
+
 }
 
 // ---------------------------------------------------------------------------
@@ -762,29 +790,36 @@ async function handleWithdrawFlow(message: Message, args: string[]): Promise<voi
   }
 
   const chain = getChain(chainId);
+  const network = await userRepo.getUserNetwork(message.author.id);
+  const isTestnet = network === "testnet";
+  if (chain.type === "litecoin" && !isLitecoinConfigured()) {
+    const errEmbed = errorEmbed("Litecoin withdrawals are disabled until the operator sets LITECOIN_API_TOKEN.");
+    if (shouldRedirect) await message.author.send({ embeds: [errEmbed] }).catch(() => {});
+    else await message.reply({ embeds: [errEmbed] });
+    return;
+  }
 
   if (chain.type === "solana") {
     try {
       new PublicKey(toAddress);
     } catch {
       const errEmbed = errorEmbed("Invalid Solana address");
-      if (shouldRedirect) {
-        await message.author.send({ embeds: [errEmbed] }).catch(() => {});
-      } else {
-        await message.reply({ embeds: [errEmbed] });
-      }
+      if (shouldRedirect) await message.author.send({ embeds: [errEmbed] }).catch(() => {});
+      else await message.reply({ embeds: [errEmbed] });
       return;
     }
-  } else {
-    if (!ethers.isAddress(toAddress)) {
-      const errEmbed = errorEmbed("Invalid EVM address");
-      if (shouldRedirect) {
-        await message.author.send({ embeds: [errEmbed] }).catch(() => {});
-      } else {
-        await message.reply({ embeds: [errEmbed] });
-      }
+  } else if (chain.type === "litecoin") {
+    if (!isLitecoinAddress(toAddress, isTestnet)) {
+      const errEmbed = errorEmbed("Invalid Litecoin address for the selected network");
+      if (shouldRedirect) await message.author.send({ embeds: [errEmbed] }).catch(() => {});
+      else await message.reply({ embeds: [errEmbed] });
       return;
     }
+  } else if (!ethers.isAddress(toAddress)) {
+    const errEmbed = errorEmbed("Invalid EVM address");
+    if (shouldRedirect) await message.author.send({ embeds: [errEmbed] }).catch(() => {});
+    else await message.reply({ embeds: [errEmbed] });
+    return;
   }
 
   const amount = parseFloat(amountStr);
@@ -799,8 +834,6 @@ async function handleWithdrawFlow(message: Message, args: string[]): Promise<voi
   }
 
   const tokenSymbol = tokenRaw.toUpperCase();
-  const network = await userRepo.getUserNetwork(message.author.id);
-  const isTestnet = network === "testnet";
 
   let token = "native";
   let decimals = chain.nativeDecimals;
@@ -864,6 +897,7 @@ async function handleWithdrawFlow(message: Message, args: string[]): Promise<voi
     tokenSymbol,
     toAddress,
     isTestnet,
+    networkFee: result.networkFee,
   });
 
   if (shouldRedirect) {
@@ -1007,7 +1041,7 @@ async function handleRain(message: Message, args: string[]): Promise<void> {
           .setDescription(
             `<@${message.author.id}> rained **${formattedPer} ${tokenSymbol}** on ${chain.emoji} **${chain.name}** ${networkLabel}`,
           )
-          .setFooter({ text: `Use ${PREFIX}balance to check your balance · Hodlr` }),
+          .setFooter({ text: `Use ${PREFIX}balance to check your balance · Crypto` }),
       ]).catch(() => {});
     }
   }
@@ -1175,7 +1209,7 @@ async function handleAirdrop(message: Message, args: string[]): Promise<void> {
         .setDescription(
           `You claimed **${claimedFormatted} ${tokenSymbol}** from an airdrop by **${message.author.displayName}** on ${chain.emoji} **${chain.name}**`,
         )
-        .setFooter({ text: `Use ${PREFIX}balance to check your balance · Hodlr` }),
+        .setFooter({ text: `Use ${PREFIX}balance to check your balance · Crypto` }),
     ]).catch(() => {});
 
     // Update the airdrop embed with new claim count
@@ -1220,7 +1254,7 @@ async function handleLeaderboard(message: Message, args: string[]): Promise<void
 
   // Parse args: optional token symbol, optional "tips" mode
   // e.g. $leaderboard | $leaderboard tips | $leaderboard eth | $leaderboard eth tips
-  const KNOWN_TOKENS = new Set(["ETH", "SOL", "AVAX", "POL", "MATIC", "ARB", "OP", "USDC", "USDT", "DAI", "LINK", "WETH", "BTC"]);
+  const KNOWN_TOKENS = new Set(["ETH", "SOL", "AVAX", "POL", "MATIC", "ARB", "OP", "USDC", "USDT", "DAI", "LINK", "WETH", "LTC", "BTC"]);
   let tokenFilter: string | null = null;
   let tipsMode = false;
   let limit = 10;
@@ -1309,10 +1343,10 @@ async function handleLeaderboard(message: Message, args: string[]): Promise<void
 }
 
 // ---------------------------------------------------------------------------
-// HODLR overview
+// Crypto overview
 // ---------------------------------------------------------------------------
 
-async function handleHodlr(message: Message): Promise<void> {
+async function handleCrypto(message: Message): Promise<void> {
   const network = await userRepo.getUserNetwork(message.author.id);
   const isTestnet = network === "testnet";
   const networkLabel = isTestnet ? `${EMOJIS.testnet} Testnet` : `${EMOJIS.mainnet} Mainnet`;
@@ -1331,7 +1365,7 @@ async function handleHodlr(message: Message): Promise<void> {
       brandEmbed()
         .setTitle(`${BRAND.name}`)
         .setDescription(
-          `Instant crypto tipping across 8 chains.\n\n` +
+          `Instant crypto tipping across 9 networks.\n\n` +
             `**Your network:** ${networkLabel}\n` +
             `Type \`${PREFIX}network mainnet\` or \`${PREFIX}network testnet\` to switch.`,
         )
@@ -1375,11 +1409,11 @@ async function handleConfig(message: Message): Promise<void> {
             value:
               `\`${PREFIX}network mainnet|testnet\` — switch network\n` +
               `\`${PREFIX}notifications on|off\` — toggle DM notifications\n` +
-              `\`${PREFIX}privatekey <chain>\` — export private key`,
+              `\`${PREFIX}privatekey\` — secure encrypted recovery dashboard`,
             inline: false,
           },
         )
-        .setFooter({ text: `Hodlr` }),
+        .setFooter({ text: `Crypto` }),
     ],
   });
 }
@@ -1427,124 +1461,15 @@ async function handleNotifications(message: Message, args: string[]): Promise<vo
 }
 
 // ---------------------------------------------------------------------------
-// PRIVATE KEY — export wallet private key (DM only, CONFIRM required)
-// ---------------------------------------------------------------------------
-
-async function handlePrivateKey(message: Message, args: string[]): Promise<void> {
-  if (await isRateLimited(message, "privatekey")) return;
-
-  // Must be used in DMs
-  if (message.guild) {
-    await message.reply({
-      embeds: [
-        brandEmbed()
-          .setColor(0xf5a623)
-          .setTitle("🔒 Private Key Export")
-          .setDescription("For your security, this command can only be used in DMs.\nSend me a DM and try again."),
-      ],
-    });
+// PRIVATE KEY — legacy command safely redirects to the encrypted recovery flow.
+async function handlePrivateKey(message: Message, _args: string[]): Promise<void> {
+  const base = config.dashboard.baseUrl;
+  if (!base) {
+    await message.reply({ embeds: [errorEmbed("Direct private-key export through Discord is disabled. The operator must configure the secure Crypto dashboard first.")] });
     return;
   }
-
-  const chainArg = args[0]?.toLowerCase();
-  if (!chainArg || !CHAIN_IDS.includes(chainArg)) {
-    await message.reply({
-      embeds: [
-        errorEmbed(
-          `Specify a valid chain.\nUsage: \`${COMMAND_HELP.privatekey.usage}\`\nValid chains: ${CHAIN_IDS.join(", ")}`,
-        ),
-      ],
-    });
-    return;
-  }
-
-  const network = await userRepo.getUserNetwork(message.author.id);
-  const isTestnet = network === "testnet";
-  const chain = getChain(chainArg);
-
-  // Confirmation step
   await message.reply({
-    embeds: [
-      brandEmbed()
-        .setColor(0xff4444)
-        .setTitle("⚠️ Confirm Private Key Export")
-        .setDescription(
-          `You are about to export your **${chain.emoji} ${chain.name}** private key.\n\n` +
-            `**Never share your private key with anyone.**\n` +
-            `Anyone with your private key has full control of your wallet.\n\n` +
-            `Type \`CONFIRM\` within 60 seconds to proceed.`,
-        ),
-    ],
-  });
-
-  // Wait for CONFIRM message
-  let confirmed = false;
-  if (message.channel.isTextBased() && !message.channel.isThread() && "awaitMessages" in message.channel) {
-    try {
-      const collected = await (message.channel as import("discord.js").DMChannel).awaitMessages({
-        filter: (m: import("discord.js").Message) =>
-          m.author.id === message.author.id && m.content === "CONFIRM",
-        max: 1,
-        time: 60_000,
-        errors: ["time"],
-      });
-      confirmed = collected.size > 0;
-    } catch {
-      confirmed = false;
-    }
-  }
-
-  if (!confirmed) {
-    await message.reply({
-      embeds: [errorEmbed("Timed out or no confirmation received. Export cancelled.")],
-    });
-    return;
-  }
-
-  const wallet = await getWalletForChainByDiscordId(message.author.id, chainArg, isTestnet);
-  if (!wallet) {
-    await message.reply({
-      embeds: [errorEmbed(`No ${chain.name} wallet found. Use \`${PREFIX}deposit ${chainArg}\` to create one.`)],
-    });
-    return;
-  }
-
-  const pk = getPrivateKey(wallet.encryptedKey);
-
-  recordUsage(message.author.id, "privatekey");
-  logSecurityEvent({
-    type: "PRIVATE_KEY_EXPORT",
-    discordId: message.author.id,
-    chainId: chainArg,
-    isTestnet,
-    extra: { network: isTestnet ? "testnet" : "mainnet" },
-  });
-
-  await message.reply({
-    embeds: [
-      brandEmbed()
-        .setColor(0xff4444)
-        .setTitle(`🔑 ${chain.emoji} ${chain.name} Private Key`)
-        .setDescription(
-          `\`\`\`\n${pk}\n\`\`\`\n` +
-            `**Delete this message after saving your key.**\n` +
-            `Never share this with anyone. Hodlr support will never ask for it.`,
-        )
-        .setFooter({ text: "Keep this secret — Hodlr" }),
-    ],
-  });
-}
-
-// Helper used by handlePrivateKey
-async function getWalletForChainByDiscordId(
-  discordId: string,
-  chainId: string,
-  isTestnet: boolean,
-) {
-  const user = await userRepo.getUser(discordId);
-  if (!user) return null;
-  const { prisma } = await import("../../database/client.js");
-  return prisma.wallet.findUnique({
-    where: { userId_chain_isTestnet: { userId: user.id, chain: chainId, isTestnet } },
+    embeds: [brandEmbed().setTitle("Secure wallet recovery")
+      .setDescription(`Crypto never sends raw private keys in Discord messages. Sign in via identify-only Discord OAuth at ${base}/auth/discord, create a one-time recovery key, and download an encrypted wallet backup. Decrypt it locally at ${base}/recover.`)],
   });
 }

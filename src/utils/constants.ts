@@ -1,10 +1,11 @@
+import { CUSTOM_EMOJIS } from "./custom-emojis.generated.js";
+
 export const PREFIX = "$";
 
 export const BRAND = {
-  name: "Hodlr",
+  name: "Crypto",
   color: 0x00d4aa,
-  icon: "https://i.ibb.co/qYZX9N8x/grok-image-1775350673726.jpg",
-  tagline: "Tip crypto. Instantly.",
+  tagline: "Crypto tips. Across chains.",
 } as const;
 
 export const LIMITS = {
@@ -39,6 +40,8 @@ export const SECURITY_LIMITS = {
     polygon:   "100000000000000000",  // 0.1 POL
     // Solana — 0.001 SOL
     solana:    "1000000",             // 0.001 SOL (1,000,000 lamports)
+    // Litecoin — 0.0001 LTC (litoshi)
+    litecoin:  "10000",
   } as Record<string, string>,
 
   largeDepositRaw: {
@@ -51,6 +54,7 @@ export const SECURITY_LIMITS = {
     avalanche: "5000000000000000000",       // 5 AVAX
     polygon:   "10000000000000000000000",   // 10,000 POL
     solana:    "1000000000",                // 1 SOL
+    litecoin:  "1000000000",                // 10 LTC
   } as Record<string, string>,
 
   largeWithdrawRaw: {
@@ -62,26 +66,30 @@ export const SECURITY_LIMITS = {
     avalanche: "5000000000000000000",       // 5 AVAX
     polygon:   "10000000000000000000000",   // 10,000 POL
     solana:    "1000000000",                // 1 SOL
+    litecoin:  "500000000",                 // 5 LTC
   } as Record<string, string>,
 };
 
+const emoji = (name: string, fallback: string): string => CUSTOM_EMOJIS[name] ?? fallback;
+
+/** Application emoji mentions take precedence when the matching image was uploaded. */
 export const EMOJIS = {
-  success: "✅",
-  error: "❌",
-  warning: "⚠️",
-  loading: "⏳",
-  tip: "💸",
-  rain: "🌧️",
-  airdrop: "🪂",
-  wallet: "👛",
-  deposit: "📥",
-  withdraw: "📤",
-  history: "📜",
-  leaderboard: "🏆",
-  price: "📊",
-  network: "🌐",
-  mainnet: "🟢",
-  testnet: "🟡",
+  success: emoji("success", "✅"),
+  error: emoji("error", "❌"),
+  warning: emoji("warning", "⚠️"),
+  loading: emoji("loading", "⏳"),
+  tip: emoji("tip", "💸"),
+  rain: emoji("rain", "🌧️"),
+  airdrop: emoji("airdrop", "🪂"),
+  wallet: emoji("wallet", "👛"),
+  deposit: emoji("deposit", "📥"),
+  withdraw: emoji("withdraw", "📤"),
+  history: emoji("history", "📜"),
+  leaderboard: emoji("leaderboard", "🏆"),
+  price: emoji("price", "📊"),
+  network: emoji("network", "🌐"),
+  mainnet: emoji("mainnet", "🟢"),
+  testnet: emoji("testnet", "🟡"),
 } as const;
 
 export const TXN_TYPES = {

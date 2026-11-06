@@ -14,6 +14,7 @@ export function getAlchemy(chainId: string, isTestnet: boolean): Alchemy {
   let client = clients.get(key);
   if (!client) {
     const net = getNetworkConfig(chainId, isTestnet);
+    if (!net.network) throw new Error(`${chainId} is not supported by Alchemy`);
     client = new Alchemy({
       apiKey: config.alchemy.apiKey,
       network: net.network,
@@ -91,8 +92,8 @@ export async function validateAlchemyConnection(): Promise<void> {
 export function getAllAlchemyNetworks(): { chainId: string; network: Network; isTestnet: boolean }[] {
   const networks: { chainId: string; network: Network; isTestnet: boolean }[] = [];
   for (const [chainId, chain] of Object.entries(CHAINS)) {
-    networks.push({ chainId, network: chain.mainnet.network, isTestnet: false });
-    networks.push({ chainId, network: chain.testnet.network, isTestnet: true });
+    if (chain.mainnet.network) networks.push({ chainId, network: chain.mainnet.network, isTestnet: false });
+    if (chain.testnet.network) networks.push({ chainId, network: chain.testnet.network, isTestnet: true });
   }
   return networks;
 }

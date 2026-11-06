@@ -13,7 +13,7 @@ export function registerGuildMemberEvents(client: Client): void {
           brandEmbed()
             .setTitle(`${EMOJIS.wallet} Welcome to ${BRAND.name}!`)
             .setDescription(
-              `**${member.guild.name}** uses **${BRAND.name}** for instant crypto tipping across 8 blockchains.`,
+              `**${member.guild.name}** uses **${BRAND.name}** for instant crypto tipping across 9 networks.`,
             )
             .addFields(
               {

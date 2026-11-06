@@ -34,7 +34,8 @@ export async function getWalletsByChain(chainId: string, isTestnet: boolean) {
 
 export async function findWalletByAddress(address: string) {
   return prisma.wallet.findFirst({
-    where: { address: address.toLowerCase() },
+    // EVM records are stored lowercase; Base58 addresses (Solana/Litecoin) are case-sensitive.
+    where: { address: { in: [...new Set([address, address.toLowerCase()])] } },
     include: { user: true },
   });
 }

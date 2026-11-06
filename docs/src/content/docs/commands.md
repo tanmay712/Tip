@@ -1,6 +1,6 @@
 ---
 title: Commands
-description: Complete reference for all Hodlr slash and prefix commands
+description: Complete reference for all Crypto slash and prefix commands
 ---
 
 All commands are available as Discord slash commands (`/command`) and prefix commands (`$command`).
@@ -126,6 +126,21 @@ Top tippers ranked by total tips sent. Limit defaults to 10, max 25.
 Live USD price and 24h change. Supported: ETH, SOL, AVAX, POL, ARB, OP, USDC, USDT, DAI, LINK, WETH, BTC.
 
 ---
+
+## Account, security, and audit
+
+- `/account status|dashboard|privacy` reviews your account and opens the authenticated recovery dashboard.
+- `/security status|dashboard|backup-guide|privacy` covers consent, recovery, and security guidance.
+- `/transactions recent|lookup|summary|deposits|withdrawals|tips` only shows transactions associated with your own account.
+- `/assets list|lookup|native-prices` lists configured chains/tokens and price data.
+- `/settings status|notifications-on|notifications-off|mainnet|testnet` controls personal preferences.
+
+The dashboard uses Discord OAuth `identify` only. Recovery keys are shown once and backups are AES-GCM encrypted. Crypto never sends raw private keys in Discord messages. Keep the recovery key and encrypted backup separately.
+
+## Server and owner controls
+
+- `/server status|log-channel-set|log-channel-clear|admin-role-set` requires Discord's **Manage Server** permission.
+- `/owner stats|user-lookup|user-ban|user-unban` is limited to IDs in `OWNER_DISCORD_IDS`.
 
 ## Settings
 

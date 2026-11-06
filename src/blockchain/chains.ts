@@ -1,6 +1,6 @@
 import { Network } from "alchemy-sdk";
 
-export type ChainType = "evm" | "solana";
+export type ChainType = "evm" | "solana" | "litecoin";
 
 export interface ChainConfig {
   id: string;
@@ -8,8 +8,8 @@ export interface ChainConfig {
   type: ChainType;
   nativeToken: string;
   nativeDecimals: number;
-  mainnet: { network: Network; rpcSuffix: string; explorer: string };
-  testnet: { network: Network; rpcSuffix: string; explorer: string };
+  mainnet: { network?: Network; rpcSuffix?: string; explorer: string };
+  testnet: { network?: Network; rpcSuffix?: string; explorer: string };
   color: number;
   emoji: string;
   derivationPath: string;
@@ -155,6 +155,22 @@ export const CHAINS: Record<string, ChainConfig> = {
     color: 0xe84142,
     emoji: "🔺",
     derivationPath: "m/44'/60'/0'/0/0",
+  },
+  litecoin: {
+    id: "litecoin",
+    name: "Litecoin",
+    type: "litecoin",
+    nativeToken: "LTC",
+    nativeDecimals: 8,
+    mainnet: {
+      explorer: "https://live.blockcypher.com/ltc",
+    },
+    testnet: {
+      explorer: "https://live.blockcypher.com/ltc-test",
+    },
+    color: 0x345d9d,
+    emoji: "Ł",
+    derivationPath: "m/44'/2'/0'/0/0",
   },
   solana: {
     id: "solana",

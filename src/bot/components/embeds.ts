@@ -10,7 +10,7 @@ import { truncateAddress, formatTokenAmount } from "../../utils/format.js";
 export function brandEmbed(): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(BRAND.color)
-    .setAuthor({ name: BRAND.name, iconURL: BRAND.icon })
+    .setAuthor({ name: BRAND.name })
     .setFooter({ text: `${BRAND.name}` })
     .setTimestamp();
 }
@@ -19,7 +19,7 @@ export function chainEmbed(chainId: string): EmbedBuilder {
   const chain = getChain(chainId);
   return new EmbedBuilder()
     .setColor(chain.color)
-    .setAuthor({ name: `${BRAND.name} · ${chain.name}`, iconURL: BRAND.icon })
+    .setAuthor({ name: `${BRAND.name} · ${chain.name}` })
     .setFooter({ text: `${chain.emoji} ${chain.name} · ${BRAND.name}` })
     .setTimestamp();
 }
@@ -192,6 +192,9 @@ export function balanceEmbed(params: {
   const embed = chainEmbed(params.chainId)
     .setTitle(`${chain.emoji} ${chain.name} Balance`)
     .addFields({ name: "Network", value: networkLabel, inline: true });
+  if (params.chainId === "litecoin") {
+    embed.setDescription("Spendable Crypto ledger balance. Litecoin backing is pooled across bot-controlled wallets.");
+  }
 
   if (params.balances.length === 0) {
     embed.addFields({ name: "Empty", value: "No balances on this chain yet.", inline: false });
@@ -220,6 +223,7 @@ export function withdrawEmbed(params: {
   tokenSymbol: string;
   toAddress: string;
   isTestnet: boolean;
+  networkFee?: string;
 }): EmbedBuilder {
   const chain = getChain(params.chainId);
   const txUrl = getExplorerTxUrl(params.chainId, params.txHash, params.isTestnet);
@@ -236,6 +240,7 @@ export function withdrawEmbed(params: {
       { name: "To", value: `\`${truncateAddress(params.toAddress)}\``, inline: true },
       { name: "Chain", value: `${chain.emoji} ${chain.name}`, inline: true },
       { name: "Network", value: networkLabel, inline: true },
+      ...(params.networkFee ? [{ name: "Network fee", value: `\`${formatTokenAmount(params.networkFee, params.decimals)} ${params.tokenSymbol}\``, inline: true }] : []),
       { name: "Transaction", value: `[View on Explorer](${txUrl})\n\`\`\`\n${params.txHash}\n\`\`\``, inline: false },
     );
 }
@@ -247,7 +252,7 @@ export function withdrawEmbed(params: {
 export function errorEmbed(message: string): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(0xff4444)
-    .setAuthor({ name: BRAND.name, iconURL: BRAND.icon })
+    .setAuthor({ name: BRAND.name })
     .setTitle(`${EMOJIS.error} Error`)
     .setDescription(message)
     .setTimestamp();

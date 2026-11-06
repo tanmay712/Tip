@@ -23,6 +23,7 @@ const COINGECKO_IDS: Record<string, string> = {
   LINK: "chainlink",
   WETH: "weth",
   BTC: "bitcoin",
+  LTC: "litecoin",
 };
 
 export interface PriceInfo {

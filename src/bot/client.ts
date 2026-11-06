@@ -55,6 +55,13 @@ export async function startBot(): Promise<Client> {
     import("./commands/price.js"),
     import("./commands/network.js"),
     import("./commands/help.js"),
+    import("./commands/owner.js"),
+    import("./commands/account.js"),
+    import("./commands/settings.js"),
+    import("./commands/server.js"),
+    import("./commands/transactions.js"),
+    import("./commands/assets.js"),
+    import("./commands/security.js"),
   ]);
 
   for (const mod of commandModules) {

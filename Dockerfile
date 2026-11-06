@@ -8,6 +8,7 @@ COPY prisma ./prisma/
 RUN npm ci
 RUN npx prisma generate
 COPY tsconfig.json ./
+COPY recovery-tool.html ./recovery-tool.html
 COPY src ./src/
 RUN npm run build
 
@@ -25,6 +26,7 @@ ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/prisma ./prisma
+COPY --from=build /app/recovery-tool.html ./recovery-tool.html
 COPY package.json ./
 
 # Create data directory for SQLite

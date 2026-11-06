@@ -1,0 +1,39 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Crypto offline recovery</title>
+<style>
+  body{font:16px/1.5 system-ui,sans-serif;max-width:700px;margin:2rem auto;padding:1rem;background:#111820;color:#eef}
+  input,button{display:block;margin:.6rem 0;padding:.7rem;max-width:100%}
+  button{background:#00a98b;color:white;border:0;border-radius:6px}
+  pre{white-space:pre-wrap;overflow-wrap:anywhere}
+</style>
+<h1>Decrypt a Crypto backup on this device</h1>
+<p>This page decrypts locally in your browser. It does not upload your recovery key or backup. Use a trusted, up-to-date browser and preferably disconnect from the network after saving this file.</p>
+<label>Encrypted backup JSON<input id="file" type="file" accept="application/json,.json"></label>
+<label>Recovery key<input id="key" autocomplete="off" spellcheck="false"></label>
+<button id="decrypt">Decrypt locally</button>
+<p id="status"></p>
+<a id="download" hidden>Download decrypted wallet backup</a>
+<script>
+const decode = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+document.querySelector('#decrypt').addEventListener('click', async () => {
+  const status = document.querySelector('#status'); status.textContent = '';
+  try {
+    const file = document.querySelector('#file').files[0];
+    const keyText = document.querySelector('#key').value.trim();
+    if (!file || !/^[A-Za-z0-9_-]{43}$/.test(keyText)) throw new Error('Choose a backup and enter its 43-character recovery key.');
+    const bundle = JSON.parse(await file.text());
+    if (bundle.format !== 'tipx-encrypted-recovery-v1' || bundle.cipher !== 'AES-256-GCM') throw new Error('Unsupported or invalid Crypto backup.');
+    const keyBytes = decode(keyText.replace(/-/g, '+').replace(/_/g, '/') + '=');
+    const key = await crypto.subtle.importKey('raw', keyBytes, 'AES-GCM', false, ['decrypt']);
+    const ct = decode(bundle.ciphertext), tag = decode(bundle.authTag), combined = new Uint8Array(ct.length + tag.length);
+    combined.set(ct); combined.set(tag, ct.length);
+    const clear = await crypto.subtle.decrypt({name:'AES-GCM', iv:decode(bundle.iv), tagLength:128}, key, combined);
+    const text = new TextDecoder().decode(clear); JSON.parse(text);
+    const link = document.querySelector('#download');
+    link.href = URL.createObjectURL(new Blob([text], {type:'application/json'})); link.download = 'crypto-decrypted-wallet-backup.json'; link.hidden = false;
+    status.textContent = 'Decrypted in this browser only. Save the file securely, then clear this page and downloads from shared devices.';
+  } catch (err) { status.textContent = err instanceof Error ? err.message : 'Could not decrypt this backup.'; }
+});
+</script>

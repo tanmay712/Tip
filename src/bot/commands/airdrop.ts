@@ -12,6 +12,7 @@ import { findToken } from "../../blockchain/tokens.js";
 import { parseTokenAmount, formatTokenAmount } from "../../utils/format.js";
 import { airdropEmbed, errorEmbed, successEmbed } from "../components/embeds.js";
 import { airdropClaimButton } from "../components/buttons.js";
+import { withComponentsV2 } from "../components/v2.js";
 import { EMOJIS, LIMITS } from "../../utils/constants.js";
 import type { BotCommand } from "../client.js";
 
@@ -119,6 +120,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
 
   collector.on("collect", async (btnInteraction: ButtonInteraction) => {
     if (!btnInteraction.customId.startsWith("airdrop_claim:")) return;
+    await withComponentsV2(btnInteraction, () => withComponentsV2(interaction, async () => {
 
     await btnInteraction.deferReply({ ephemeral: true });
 
@@ -167,6 +169,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
           claimCount >= result.maxClaims ? [] : [airdropClaimButton(result.airdropId!)],
       });
     }
+    }));
   });
 
   collector.on("end", async () => {
