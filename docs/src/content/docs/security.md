@@ -37,14 +37,6 @@ Tips, rain, and airdrops between Crypto users are **off-chain database transfers
 - Instant settlement
 - Only withdrawals to external addresses touch the blockchain
 
-## Webhook Verification
-
-Alchemy deposit webhooks are verified using HMAC-SHA256:
-
-1. Alchemy signs the payload with your webhook signing key
-2. Crypto recomputes the HMAC and uses timing-safe comparison
-3. Invalid signatures are rejected with 401
-
 ## Rate Limiting
 
 All Discord commands are rate-limited to **10 commands per minute per user**. This prevents spam and abuse.
@@ -69,7 +61,7 @@ Sensitive information is always sent as ephemeral messages (only visible to the 
 
 3. **Use PostgreSQL in production**: SQLite is great for development, but PostgreSQL offers better concurrency and backup options.
 
-4. **Set up Alchemy webhooks**: Don't rely solely on polling for deposit detection.
+4. **Use trusted RPC endpoints**: Public endpoints need no account, but may rate-limit or be unavailable. Configure chain-specific RPC URLs for reliability, and test deposit scanning before enabling real funds.
 
 5. **Run behind a reverse proxy**: Use nginx or Cloudflare to handle TLS termination for the webhook endpoint.
 

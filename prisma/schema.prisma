@@ -97,3 +97,13 @@ model BannedUser {
   bannedBy  String
   createdAt DateTime @default(now())
 }
+
+model ChainCursor {
+  id               String   @id @default(cuid())
+  chain            String
+  isTestnet        Boolean  @default(false)
+  lastScannedBlock Int
+  updatedAt        DateTime @updatedAt
+
+  @@unique([chain, isTestnet])
+}

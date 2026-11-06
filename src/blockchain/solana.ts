@@ -12,20 +12,19 @@ import {
   createTransferInstruction,
   getAccount,
 } from "@solana/spl-token";
-import { config } from "../config.js";
+import { getRpcUrl } from "./provider.js";
 
 const connections = new Map<string, Connection>();
 
-function getRpcUrl(isTestnet: boolean): string {
-  const suffix = isTestnet ? "solana-devnet" : "solana-mainnet";
-  return `https://${suffix}.g.alchemy.com/v2/${config.alchemy.apiKey}`;
+function getSolanaRpcUrl(isTestnet: boolean): string {
+  return getRpcUrl("solana", isTestnet);
 }
 
 export function getSolanaConnection(isTestnet: boolean): Connection {
   const key = isTestnet ? "devnet" : "mainnet";
   let conn = connections.get(key);
   if (!conn) {
-    conn = new Connection(getRpcUrl(isTestnet), "confirmed");
+    conn = new Connection(getSolanaRpcUrl(isTestnet), "confirmed");
     connections.set(key, conn);
   }
   return conn;

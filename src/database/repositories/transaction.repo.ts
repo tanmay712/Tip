@@ -25,6 +25,7 @@ export async function findTransactionByTxHash(params: {
   chain: string;
   isTestnet: boolean;
   receiverId?: string;
+  token?: string;
 }) {
   return prisma.transaction.findFirst({
     where: {
@@ -33,6 +34,7 @@ export async function findTransactionByTxHash(params: {
       chain: params.chain,
       isTestnet: params.isTestnet,
       ...(params.receiverId ? { receiverId: params.receiverId } : {}),
+      ...(params.token ? { token: params.token } : {}),
     },
     select: { id: true },
   });

@@ -11,6 +11,14 @@ function optional(key: string, fallback: string): string {
   return process.env[key] || fallback;
 }
 
+function boundedInt(key: string, fallback: number, min: number, max: number): number {
+  const value = Number(process.env[key] || fallback);
+  if (!Number.isSafeInteger(value) || value < min || value > max) {
+    throw new Error(`${key} must be an integer from ${min} to ${max}`);
+  }
+  return value;
+}
+
 function litecoinApiBaseUrl(): string {
   const value = optional("LITECOIN_API_BASE_URL", "https://api.blockcypher.com/v1/ltc");
   try {
@@ -68,9 +76,9 @@ export const config = {
       .map((id) => id.trim())
       .filter(Boolean),
   },
-  alchemy: {
-    apiKey: required("ALCHEMY_API_KEY"),
-    webhookSigningKey: process.env.ALCHEMY_WEBHOOK_SIGNING_KEY || "",
+  rpc: {
+    evmConfirmations: boundedInt("EVM_CONFIRMATIONS", 6, 1, 100),
+    blockScanBatchSize: boundedInt("EVM_BLOCK_SCAN_BATCH_SIZE", 100, 1, 100),
   },
   litecoin: {
     apiBaseUrl: litecoinApiBaseUrl(),

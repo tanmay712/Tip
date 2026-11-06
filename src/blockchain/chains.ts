@@ -1,5 +1,3 @@
-import { Network } from "alchemy-sdk";
-
 export type ChainType = "evm" | "solana" | "litecoin";
 
 export interface ChainConfig {
@@ -8,8 +6,8 @@ export interface ChainConfig {
   type: ChainType;
   nativeToken: string;
   nativeDecimals: number;
-  mainnet: { network?: Network; rpcSuffix?: string; explorer: string };
-  testnet: { network?: Network; rpcSuffix?: string; explorer: string };
+  mainnet: { rpcUrl?: string; explorer: string };
+  testnet: { rpcUrl?: string; explorer: string };
   color: number;
   emoji: string;
   derivationPath: string;
@@ -23,13 +21,11 @@ export const CHAINS: Record<string, ChainConfig> = {
     nativeToken: "ETH",
     nativeDecimals: 18,
     mainnet: {
-      network: Network.ETH_MAINNET,
-      rpcSuffix: "eth-mainnet",
+      rpcUrl: "https://ethereum-rpc.publicnode.com",
       explorer: "https://etherscan.io",
     },
     testnet: {
-      network: Network.ETH_SEPOLIA,
-      rpcSuffix: "eth-sepolia",
+      rpcUrl: "https://ethereum-sepolia-rpc.publicnode.com",
       explorer: "https://sepolia.etherscan.io",
     },
     color: 0x627eea,
@@ -43,13 +39,11 @@ export const CHAINS: Record<string, ChainConfig> = {
     nativeToken: "POL",
     nativeDecimals: 18,
     mainnet: {
-      network: Network.MATIC_MAINNET,
-      rpcSuffix: "polygon-mainnet",
+      rpcUrl: "https://polygon-bor-rpc.publicnode.com",
       explorer: "https://polygonscan.com",
     },
     testnet: {
-      network: Network.MATIC_AMOY,
-      rpcSuffix: "polygon-amoy",
+      rpcUrl: "https://polygon-amoy-bor-rpc.publicnode.com",
       explorer: "https://amoy.polygonscan.com",
     },
     color: 0x8247e5,
@@ -63,13 +57,11 @@ export const CHAINS: Record<string, ChainConfig> = {
     nativeToken: "ETH",
     nativeDecimals: 18,
     mainnet: {
-      network: Network.ARB_MAINNET,
-      rpcSuffix: "arb-mainnet",
+      rpcUrl: "https://arbitrum-one-rpc.publicnode.com",
       explorer: "https://arbiscan.io",
     },
     testnet: {
-      network: Network.ARB_SEPOLIA,
-      rpcSuffix: "arb-sepolia",
+      rpcUrl: "https://arbitrum-sepolia-rpc.publicnode.com",
       explorer: "https://sepolia.arbiscan.io",
     },
     color: 0x28a0f0,
@@ -83,13 +75,11 @@ export const CHAINS: Record<string, ChainConfig> = {
     nativeToken: "ETH",
     nativeDecimals: 18,
     mainnet: {
-      network: Network.OPT_MAINNET,
-      rpcSuffix: "opt-mainnet",
+      rpcUrl: "https://optimism-rpc.publicnode.com",
       explorer: "https://optimistic.etherscan.io",
     },
     testnet: {
-      network: Network.OPT_SEPOLIA,
-      rpcSuffix: "opt-sepolia",
+      rpcUrl: "https://optimism-sepolia-rpc.publicnode.com",
       explorer: "https://sepolia-optimism.etherscan.io",
     },
     color: 0xff0420,
@@ -103,13 +93,11 @@ export const CHAINS: Record<string, ChainConfig> = {
     nativeToken: "ETH",
     nativeDecimals: 18,
     mainnet: {
-      network: Network.BASE_MAINNET,
-      rpcSuffix: "base-mainnet",
+      rpcUrl: "https://base-rpc.publicnode.com",
       explorer: "https://basescan.org",
     },
     testnet: {
-      network: Network.BASE_SEPOLIA,
-      rpcSuffix: "base-sepolia",
+      rpcUrl: "https://base-sepolia-rpc.publicnode.com",
       explorer: "https://sepolia.basescan.org",
     },
     color: 0x0052ff,
@@ -123,13 +111,11 @@ export const CHAINS: Record<string, ChainConfig> = {
     nativeToken: "ETH",
     nativeDecimals: 18,
     mainnet: {
-      network: Network.ZKSYNC_MAINNET,
-      rpcSuffix: "zksync-mainnet",
+      rpcUrl: "https://mainnet.era.zksync.io",
       explorer: "https://explorer.zksync.io",
     },
     testnet: {
-      network: Network.ZKSYNC_SEPOLIA,
-      rpcSuffix: "zksync-sepolia",
+      rpcUrl: "https://sepolia.era.zksync.dev",
       explorer: "https://sepolia.explorer.zksync.io",
     },
     color: 0x8c8dfc,
@@ -143,13 +129,11 @@ export const CHAINS: Record<string, ChainConfig> = {
     nativeToken: "AVAX",
     nativeDecimals: 18,
     mainnet: {
-      network: Network.AVAX_MAINNET,
-      rpcSuffix: "avax-mainnet",
+      rpcUrl: "https://api.avax.network/ext/bc/C/rpc",
       explorer: "https://snowtrace.io",
     },
     testnet: {
-      network: Network.AVAX_FUJI,
-      rpcSuffix: "avax-fuji",
+      rpcUrl: "https://api.avax-test.network/ext/bc/C/rpc",
       explorer: "https://testnet.snowtrace.io",
     },
     color: 0xe84142,
@@ -179,13 +163,11 @@ export const CHAINS: Record<string, ChainConfig> = {
     nativeToken: "SOL",
     nativeDecimals: 9,
     mainnet: {
-      network: Network.SOLANA_MAINNET,
-      rpcSuffix: "solana-mainnet",
+      rpcUrl: "https://api.mainnet-beta.solana.com",
       explorer: "https://solscan.io",
     },
     testnet: {
-      network: Network.SOLANA_DEVNET,
-      rpcSuffix: "solana-devnet",
+      rpcUrl: "https://api.devnet.solana.com",
       explorer: "https://solscan.io?cluster=devnet",
     },
     color: 0x9945ff,

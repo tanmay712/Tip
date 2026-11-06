@@ -1,7 +1,6 @@
 import { connectDatabase } from "./database/client.js";
 import { startBot } from "./bot/client.js";
 import { startApiServer } from "./api/server.js";
-import { validateAlchemyConnection } from "./blockchain/alchemy.js";
 import { startDepositPoller } from "./core/deposit.service.js";
 import { logger } from "./utils/logger.js";
 
@@ -10,8 +9,6 @@ async function main(): Promise<void> {
 
   await connectDatabase();
   logger.info("Database connected");
-
-  await validateAlchemyConnection();
 
   await startApiServer();
 

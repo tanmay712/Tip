@@ -3,7 +3,7 @@ import * as userRepo from "../../database/repositories/user.repo.js";
 import * as txRepo from "../../database/repositories/transaction.repo.js";
 import { getOrCreateWallet } from "../../core/wallet.service.js";
 import { CHAIN_IDS, getChain } from "../../blockchain/chains.js";
-import * as alchemyApi from "../../blockchain/alchemy.js";
+import * as rpcApi from "../../blockchain/rpc.js";
 import { getSolBalance } from "../../blockchain/solana.js";
 
 import { balanceEmbed, brandEmbed } from "../components/embeds.js";
@@ -45,7 +45,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     } else if (chain.type === "litecoin") {
       nativeBalance = "0"; // LTC balances shown here are pooled internal liabilities, not the address's backing reserve.
     } else {
-      nativeBalance = await alchemyApi.getBalance(chainId, address, isTestnet);
+      nativeBalance = await rpcApi.getBalance(chainId, address, isTestnet);
     }
 
     // Internal balance (from tips/rain/airdrops)
@@ -68,9 +68,9 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
     // Token balances (on-chain)
     if (chain.type === "evm") {
       try {
-        const tokenBals = await alchemyApi.getTokenBalances(chainId, address, isTestnet);
+        const tokenBals = await rpcApi.getTokenBalances(chainId, address, isTestnet);
         for (const tb of tokenBals) {
-          const meta = await alchemyApi.getTokenMetadata(chainId, tb.contractAddress, isTestnet);
+          const meta = await rpcApi.getTokenMetadata(chainId, tb.contractAddress, isTestnet);
           if (meta.symbol) {
             balances.push({
               symbol: meta.symbol,

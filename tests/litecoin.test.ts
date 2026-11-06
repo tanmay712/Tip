@@ -4,7 +4,6 @@ import { after, before, test } from "node:test";
 
 process.env.DISCORD_TOKEN ||= "test-discord-token";
 process.env.DISCORD_CLIENT_ID ||= "test-discord-client";
-process.env.ALCHEMY_API_KEY ||= "test-alchemy-key";
 process.env.ENCRYPTION_SECRET ||= "11".repeat(32);
 process.env.LITECOIN_API_TOKEN ||= "test-provider-token";
 

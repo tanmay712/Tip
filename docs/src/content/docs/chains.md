@@ -3,7 +3,7 @@ title: Supported Chains
 description: All blockchains supported by Crypto
 ---
 
-Crypto supports nine networks: eight EVM/Solana networks through Alchemy and Litecoin through a hosted BlockCypher-compatible UTXO API. Litecoin mainnet and Testnet3 are supported when the operator configures the provider.
+Crypto supports nine networks: eight EVM/Solana networks through public JSON-RPC endpoints that require no account login, and Litecoin through a hosted BlockCypher-compatible UTXO API. Operators can override each EVM/Solana RPC URL with a chain-specific environment variable. Litecoin mainnet and Testnet3 are supported when the operator configures the provider.
 
 ## EVM Chains
 
