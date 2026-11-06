@@ -17,7 +17,6 @@ import { getLeaderboardUSD } from "../../core/leaderboard.service.js";
 import { getPrice } from "../../core/price.service.js";
 import { CHAIN_IDS, getChain } from "../../blockchain/chains.js";
 import { formatTokenAmount, formatUsd } from "../../utils/format.js";
-import * as alchemyApi from "../../blockchain/alchemy.js";
 import { getSolBalance } from "../../blockchain/solana.js";
 import { withComponentsV2 } from "../components/v2.js";
 import { config } from "../../config.js";

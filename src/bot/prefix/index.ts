@@ -19,7 +19,7 @@ import { getLeaderboard, getLeaderboardUSD, getLeaderboardTips } from "../../cor
 import { getPrice, getPrices } from "../../core/price.service.js";
 import { withdraw } from "../../core/withdraw.service.js";
 import { createAirdrop, claimAirdrop } from "../../core/airdrop.service.js";
-import * as alchemyApi from "../../blockchain/alchemy.js";
+import * as rpcApi from "../../blockchain/rpc.js";
 import { getSolBalance } from "../../blockchain/solana.js";
 import { isLitecoinAddress, isLitecoinConfigured } from "../../blockchain/litecoin.js";
 import { parseTokenAmount, formatTokenAmount, formatUsd } from "../../utils/format.js";
@@ -520,7 +520,7 @@ async function handleBalance(message: Message, args: string[]): Promise<void> {
     } else if (chain.type === "litecoin") {
       nativeBalance = "0"; // Report the pooled internal liability, never add backing UTXOs twice.
     } else {
-      nativeBalance = await alchemyApi.getBalance(specificChain, address, isTestnet);
+      nativeBalance = await rpcApi.getBalance(specificChain, address, isTestnet);
     }
 
     const internalBalance = await txRepo.getUserBalance(
@@ -540,9 +540,9 @@ async function handleBalance(message: Message, args: string[]): Promise<void> {
 
     if (chain.type === "evm") {
       try {
-        const tokenBals = await alchemyApi.getTokenBalances(specificChain, address, isTestnet);
+        const tokenBals = await rpcApi.getTokenBalances(specificChain, address, isTestnet);
         for (const tb of tokenBals) {
-          const meta = await alchemyApi.getTokenMetadata(
+          const meta = await rpcApi.getTokenMetadata(
             specificChain,
             tb.contractAddress,
             isTestnet,

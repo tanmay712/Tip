@@ -2,7 +2,7 @@
 
 > Crypto tips. Across chains.
 
-A Discord crypto tipping bot powered by [Alchemy](https://www.alchemy.com/) for EVM/Solana networks and a hosted BlockCypher-compatible API for Litecoin. Send tips, rain tokens, create airdrops, deposit, and withdraw across **nine networks** with mainnet and testnet support.
+A Discord crypto tipping bot using public, no-login RPC endpoints for EVM/Solana networks and a hosted BlockCypher-compatible API for Litecoin. Send tips, rain tokens, create airdrops, deposit, and withdraw across **nine networks** with mainnet and testnet support.
 
 ---
 
@@ -58,7 +58,7 @@ The included Terms and Privacy Policy are **draft templates**, not legal advice.
 
 ## Network coverage and deposits
 
-Crypto supports eight EVM/Solana networks through Alchemy and Litecoin through a separate BlockCypher-compatible UTXO provider. EVM deposits are polled every 60 seconds using Alchemy's `getAssetTransfers`; Litecoin deposit history is polled through the configured hosted provider and credited only after the configured confirmation count. Litecoin deposits under 0.0001 LTC are ignored. EVM Alchemy webhooks remain available (`ALCHEMY_WEBHOOK_SIGNING_KEY` + POST `/webhooks/alchemy`).
+Crypto supports eight EVM/Solana networks using public JSON-RPC endpoints (no provider login/API key required) and Litecoin through a separate BlockCypher-compatible UTXO provider. EVM deposits are polled every 60 seconds from confirmation-safe blocks and standard ERC-20 transfer logs; scan cursors persist in the database. Litecoin deposits are credited after the configured confirmations, and deposits under 0.0001 LTC are ignored. Each EVM/Solana endpoint can be overridden with its `*_RPC_URL` environment variable.
 
 Litecoin keys use BIP44 coin type 2 and are held encrypted by the server, consistent with Crypto's custodial design. LTC balances are pooled internally: transactions are signed from the bot-controlled Litecoin wallet set, and a reserve check blocks withdrawals if on-chain funds are below recorded user liabilities. Uncertain provider broadcast results stay reserved as pending for operator reconciliation rather than risking a duplicate spend. Do not run multiple active bot instances against the same Litecoin wallets; this release has no distributed UTXO-spend lock.
 
@@ -76,7 +76,6 @@ Edit `.env` — minimum required:
 ```env
 DISCORD_TOKEN=
 DISCORD_CLIENT_ID=
-ALCHEMY_API_KEY=
 ENCRYPTION_SECRET=   # openssl rand -hex 32
 ```
 
@@ -98,8 +97,9 @@ npm run dev
 | `TERMS_VERSION` | No | `2026-11` | Version of consent recorded for new/updated legal terms |
 | `LEGAL_DOCUMENTS_APPROVED` | Before consent | `false` | Operator attestation: set true only after replacing/reviewing the draft policy and terms |
 | `DISCORD_GUILD_ID` | No | — | Dev mode: restrict command registration to one guild |
-| `ALCHEMY_API_KEY` | Yes | — | Alchemy API key |
-| `ALCHEMY_WEBHOOK_SIGNING_KEY` | No | — | Optional: verify incoming Alchemy webhooks |
+| `*_RPC_URL` | No | PublicNode/official public RPCs | Per-chain endpoint override; no API login is required for defaults |
+| `EVM_CONFIRMATIONS` | No | `6` | Confirmations required before EVM deposits are credited |
+| `EVM_BLOCK_SCAN_BATCH_SIZE` | No | `100` | EVM block scan work per polling pass (1–100) |
 | `LITECOIN_API_BASE_URL` | For LTC | `https://api.blockcypher.com/v1/ltc` | HTTPS BlockCypher-compatible provider API root |
 | `LITECOIN_API_TOKEN` | For LTC | — | Provider token; LTC deposits and on-chain withdrawals remain disabled without it |
 | `LITECOIN_CONFIRMATIONS` | No | `6` | LTC confirmations required before crediting deposits (1–100) |
@@ -128,9 +128,9 @@ src/
 │   ├── events/           # Discord events
 │   └── components/       # Components V2 adapter, embeds, buttons, pagination
 ├── core/                 # Business logic — tip, rain, airdrop, withdraw, deposit
-├── blockchain/           # Alchemy SDK, ethers.js, Solana, Litecoin UTXO provider
+├── blockchain/           # Public JSON-RPC, ethers.js, Solana, Litecoin UTXO provider
 ├── database/             # Prisma client + repositories
-├── api/                  # Fastify — health, stats, Alchemy webhooks
+├── api/                  # Fastify — health, stats, account dashboard
 └── utils/                # Crypto, format, logging, custom emoji map, constants
 emojis/                    # Upload artwork here via npm run emojis:upload
 scripts/upload-emojis.ts   # Sync application emojis to Discord
@@ -165,12 +165,11 @@ npm start
 |--------|------|------|-------------|
 | `GET` | `/health` | None | Liveness check |
 | `GET` | `/stats` | None | User, wallet, transaction counts |
-| `POST` | `/webhooks/alchemy` | HMAC-SHA256 | Real-time deposit events from Alchemy |
 
 ## Security
 
 - Private keys encrypted at rest with **AES-256-GCM**
-- Alchemy webhook payloads verified via HMAC-SHA256
+- EVM deposit scans credit only after the configured confirmation depth
 - Per-user rate limiting: 10 commands/minute
 - Sensitive replies (wallets, balances) are ephemeral
 - Raw keys are never sent through Discord; the dashboard only exports an AES-GCM encrypted archive for the user's offline recovery
@@ -194,4 +193,4 @@ Copyright (c) 2026 HiLleywyn. All Rights Reserved.
 
 ---
 
-Built with [Discord.js](https://discord.js.org/) · [Alchemy SDK](https://www.alchemy.com/sdk) · [ethers.js](https://docs.ethers.org/) · [Prisma](https://www.prisma.io/) · [Fastify](https://fastify.dev/)
+Built with [Discord.js](https://discord.js.org/) · [ethers.js](https://docs.ethers.org/) · [Prisma](https://www.prisma.io/) · [Fastify](https://fastify.dev/)

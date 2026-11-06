@@ -1,9 +1,11 @@
 import { PublicKey } from "@solana/web3.js";
+import { ethers } from "ethers";
 import * as walletRepo from "../database/repositories/wallet.repo.js";
 import * as txRepo from "../database/repositories/transaction.repo.js";
 import { prisma } from "../database/client.js";
 import { getChain, CHAIN_IDS, getExplorerTxUrl } from "../blockchain/chains.js";
-import { getAlchemy } from "../blockchain/alchemy.js";
+import { getEvmProvider } from "../blockchain/provider.js";
+import { KNOWN_TOKENS } from "../blockchain/tokens.js";
 import { getSolanaConnection } from "../blockchain/solana.js";
 import { getLitecoinTransactions, getLitecoinTransaction, isLitecoinConfigured } from "../blockchain/litecoin.js";
 import { TXN_TYPES, LIMITS, SECURITY_LIMITS } from "../utils/constants.js";
@@ -11,11 +13,8 @@ import { formatTokenAmount } from "../utils/format.js";
 import { logger } from "../utils/logger.js";
 import { config } from "../config.js";
 import { logSecurityEvent } from "../utils/security.js";
-import type { AlchemyWebhookEvent } from "../blockchain/webhooks.js";
 import { dmUser, logToAllChannels } from "../bot/notifications.js";
 import { brandEmbed } from "../bot/components/embeds.js";
-
-const lastProcessedBlock = new Map<string, string>();
 
 async function notifyDeposit(params: {
   userId: string;
@@ -67,223 +66,176 @@ async function notifyDeposit(params: {
   logToAllChannels([logEmbed]).catch(() => {});
 }
 
-export async function processWebhookDeposit(
-  event: AlchemyWebhookEvent,
-): Promise<{ credited: number }> {
-  let credited = 0;
+const TRANSFER_TOPIC = ethers.id("Transfer(address,address,uint256)");
+const TRANSFER_EVENT = new ethers.Interface(["event Transfer(address indexed from, address indexed to, uint256 value)"]);
 
-  for (const activity of event.event.activity) {
-    const toAddress = activity.toAddress?.toLowerCase();
-    if (!toAddress) continue;
+async function creditEvmDeposit(params: {
+  wallet: { userId: string; address: string };
+  chainId: string;
+  isTestnet: boolean;
+  txHash: string;
+  token: string;
+  tokenSymbol: string;
+  decimals: number;
+  amount: bigint;
+}): Promise<void> {
+  if (params.amount <= 0n || !/^[0-9a-f]{64}$/i.test(params.txHash)) return;
+  const txHash = params.txHash.toLowerCase();
+  const existing = await txRepo.findTransactionByTxHash({
+    txHash,
+    type: TXN_TYPES.DEPOSIT,
+    chain: params.chainId,
+    isTestnet: params.isTestnet,
+    receiverId: params.wallet.userId,
+    token: params.token,
+  });
+  if (existing) return;
 
-    const wallet = await walletRepo.findWalletByAddress(toAddress);
-    if (!wallet) continue;
-
-    const existing = await txRepo.findTransactionByTxHash({
-      txHash: activity.hash,
-      type: TXN_TYPES.DEPOSIT,
-      chain: wallet.chain,
-      isTestnet: wallet.isTestnet,
-    });
-    if (existing) continue;
-
-    const tokenSymbol = activity.asset || getChain(wallet.chain).nativeToken;
-    const token = activity.rawContract?.address?.toLowerCase() || "native";
-    const rawAmount = activity.rawContract
-      ? activity.rawContract.rawValue
-      : Math.floor(
-          activity.value * 10 ** getChain(wallet.chain).nativeDecimals,
-        ).toString();
-
-    const chain = getChain(wallet.chain);
-
-    // Dust filter — ignore deposits below minimum threshold
-    const minRaw = SECURITY_LIMITS.minDepositRaw[wallet.chain];
-    if (minRaw && BigInt(rawAmount) < BigInt(minRaw)) {
+  if (params.token === "native") {
+    const minRaw = SECURITY_LIMITS.minDepositRaw[params.chainId];
+    if (minRaw && params.amount < BigInt(minRaw)) {
       logSecurityEvent({
         type: "DUST_DEPOSIT_IGNORED",
-        chainId: wallet.chain,
-        amount: rawAmount,
-        decimals: chain.nativeDecimals,
-        tokenSymbol,
-        txHash: activity.hash,
-        isTestnet: wallet.isTestnet,
-        extra: { address: toAddress },
+        chainId: params.chainId,
+        amount: params.amount.toString(),
+        decimals: params.decimals,
+        tokenSymbol: params.tokenSymbol,
+        txHash,
+        isTestnet: params.isTestnet,
+        extra: { address: params.wallet.address },
       });
-      continue;
+      return;
     }
-
-    await txRepo.createTransaction({
-      type: TXN_TYPES.DEPOSIT,
-      receiverId: wallet.userId,
-      chain: wallet.chain,
-      token,
-      tokenSymbol,
-      amount: rawAmount,
-      txHash: activity.hash,
-      isTestnet: wallet.isTestnet,
-      status: "completed",
-    });
-
-    // Alert on large deposits
-    const largeRaw = SECURITY_LIMITS.largeDepositRaw[wallet.chain];
-    const isLarge = largeRaw && BigInt(rawAmount) >= BigInt(largeRaw);
-    logSecurityEvent({
-      type: isLarge ? "LARGE_DEPOSIT" : "DEPOSIT_CREDITED",
-      chainId: wallet.chain,
-      amount: rawAmount,
-      decimals: chain.nativeDecimals,
-      tokenSymbol,
-      txHash: activity.hash,
-      isTestnet: wallet.isTestnet,
-      extra: { address: toAddress },
-    });
-
-    notifyDeposit({
-      userId: wallet.userId,
-      chainId: wallet.chain,
-      tokenSymbol,
-      rawAmount,
-      decimals: chain.nativeDecimals,
-      txHash: activity.hash,
-      isTestnet: wallet.isTestnet,
-    }).catch(() => {});
-
-    credited++;
-    logger.info(
-      { address: toAddress, chain: wallet.chain, txHash: activity.hash, amount: rawAmount },
-      "Deposit credited via webhook",
-    );
   }
 
-  return { credited };
+  const amount = params.amount.toString();
+  await txRepo.createTransaction({
+    type: TXN_TYPES.DEPOSIT,
+    receiverId: params.wallet.userId,
+    chain: params.chainId,
+    token: params.token,
+    tokenSymbol: params.tokenSymbol,
+    amount,
+    txHash,
+    isTestnet: params.isTestnet,
+    status: "completed",
+  });
+
+  const largeRaw = params.token === "native" ? SECURITY_LIMITS.largeDepositRaw[params.chainId] : undefined;
+  logSecurityEvent({
+    type: largeRaw && params.amount >= BigInt(largeRaw) ? "LARGE_DEPOSIT" : "DEPOSIT_CREDITED",
+    chainId: params.chainId,
+    amount,
+    decimals: params.decimals,
+    tokenSymbol: params.tokenSymbol,
+    txHash,
+    isTestnet: params.isTestnet,
+    extra: { address: params.wallet.address },
+  });
+  notifyDeposit({
+    userId: params.wallet.userId,
+    chainId: params.chainId,
+    tokenSymbol: params.tokenSymbol,
+    rawAmount: amount,
+    decimals: params.decimals,
+    txHash,
+    isTestnet: params.isTestnet,
+  }).catch(() => {});
+  logger.info({ address: params.wallet.address, chain: params.chainId, txHash, amount, token: params.token }, "Deposit credited from public RPC");
 }
 
 async function pollEvmChain(chainId: string, isTestnet: boolean): Promise<void> {
   const wallets = await walletRepo.getWalletsByChain(chainId, isTestnet);
   if (wallets.length === 0) return;
 
-  const alchemy = getAlchemy(chainId, isTestnet);
-  const key = `${chainId}:${isTestnet}`;
+  const provider = getEvmProvider(chainId, isTestnet);
+  const latestBlock = await provider.getBlockNumber();
+  const confirmedHead = latestBlock - config.rpc.evmConfirmations;
+  if (confirmedHead < 0) return;
 
-  let fromBlock = lastProcessedBlock.get(key);
-  if (!fromBlock) {
-    const current = await alchemy.core.getBlockNumber();
-    fromBlock = "0x" + Math.max(0, current - 1000).toString(16);
+  const cursorModel = (prisma as any).chainCursor;
+  let cursor = await cursorModel.findUnique({ where: { chain_isTestnet: { chain: chainId, isTestnet } } });
+  if (!cursor) {
+    const initialBlock = Math.max(0, confirmedHead - 1000);
+    cursor = await cursorModel.create({ data: { chain: chainId, isTestnet, lastScannedBlock: initialBlock - 1 } });
   }
-
-  const currentBlockNum = await alchemy.core.getBlockNumber();
-  const toBlock = "0x" + currentBlockNum.toString(16);
-
-  if (fromBlock === toBlock) return;
-
+  const fromBlock = Number(cursor.lastScannedBlock) + 1;
+  if (fromBlock > confirmedHead) return;
+  const toBlock = Math.min(confirmedHead, fromBlock + config.rpc.blockScanBatchSize - 1);
   const chain = getChain(chainId);
+  const walletByAddress = new Map<string, { userId: string; address: string }>(
+    wallets.map((wallet: { userId: string; address: string }) => [wallet.address.toLowerCase(), wallet]),
+  );
 
-  for (const wallet of wallets) {
-    try {
-      const result = await alchemy.core.getAssetTransfers({
-        fromBlock,
-        toBlock,
-        toAddress: wallet.address,
-        excludeZeroValue: true,
-        category: ["external", "erc20"] as never,
-        maxCount: 100,
-        order: "desc" as never,
-      } as never);
-
-      for (const transfer of (result as unknown as { transfers: Record<string, unknown>[] }).transfers) {
-        const hash = transfer.hash as string;
-        if (!hash) continue;
-
-        const existing = await txRepo.findTransactionByTxHash({
-          txHash: hash,
-          type: TXN_TYPES.DEPOSIT,
-          chain: chainId,
-          isTestnet,
-        });
-        if (existing) continue;
-
-        const rawContractAddress = (transfer.rawContract as Record<string, string> | null)?.address?.toLowerCase() || null;
-        const rawContractValue = (transfer.rawContract as Record<string, string> | null)?.value || null;
-        const floatValue = transfer.value as number | null;
-
-        const token = rawContractAddress || "native";
-        const tokenSymbol = (transfer.asset as string) || chain.nativeToken;
-
-        let rawAmount: string;
-        if (rawContractValue) {
-          rawAmount = BigInt(rawContractValue).toString();
-        } else if (floatValue != null) {
-          rawAmount = BigInt(Math.round(floatValue * 10 ** chain.nativeDecimals)).toString();
-        } else {
-          continue;
-        }
-
-        if (BigInt(rawAmount) <= 0n) continue;
-
-        // Dust filter
-        const minRaw = SECURITY_LIMITS.minDepositRaw[chainId];
-        if (minRaw && BigInt(rawAmount) < BigInt(minRaw)) {
-          logSecurityEvent({
-            type: "DUST_DEPOSIT_IGNORED",
-            chainId,
-            amount: rawAmount,
-            decimals: chain.nativeDecimals,
-            tokenSymbol,
-            txHash: hash,
-            isTestnet,
-            extra: { address: wallet.address },
-          });
-          continue;
-        }
-
-        await txRepo.createTransaction({
-          type: TXN_TYPES.DEPOSIT,
-          receiverId: wallet.userId,
-          chain: chainId,
-          token,
-          tokenSymbol,
-          amount: rawAmount,
-          txHash: hash,
-          isTestnet,
-          status: "completed",
-        });
-
-        // Large deposit alert
-        const largeRaw = SECURITY_LIMITS.largeDepositRaw[chainId];
-        const isLarge = largeRaw && BigInt(rawAmount) >= BigInt(largeRaw);
-        logSecurityEvent({
-          type: isLarge ? "LARGE_DEPOSIT" : "DEPOSIT_CREDITED",
+  // Scan top-level native transfers. Read at most five confirmed blocks concurrently.
+  const readBlock = (blockNumber: number) => provider.send("eth_getBlockByNumber", [ethers.toQuantity(blockNumber), true]) as Promise<{
+    transactions?: Array<{ hash?: string; to?: string | null; value?: string }> | null;
+  } | null>;
+  for (let batchStart = fromBlock; batchStart <= toBlock; batchStart += 5) {
+    const blockNumbers = Array.from({ length: Math.min(5, toBlock - batchStart + 1) }, (_, index) => batchStart + index);
+    const blocks = await Promise.all(blockNumbers.map(readBlock));
+    for (let index = 0; index < blocks.length; index++) {
+      const block = blocks[index];
+      if (!block) throw new Error(`Public RPC returned no block ${blockNumbers[index]}`);
+      for (const transaction of block.transactions ?? []) {
+        const toAddress = transaction.to?.toLowerCase();
+        const wallet = toAddress ? walletByAddress.get(toAddress) : undefined;
+        if (!wallet || !transaction.hash || !transaction.value) continue;
+        const amount = BigInt(transaction.value);
+        if (amount === 0n) continue;
+        await creditEvmDeposit({
+          wallet,
           chainId,
-          amount: rawAmount,
-          decimals: chain.nativeDecimals,
-          tokenSymbol,
-          txHash: hash,
           isTestnet,
-          extra: { address: wallet.address },
+          txHash: transaction.hash,
+          token: "native",
+          tokenSymbol: chain.nativeToken,
+          decimals: chain.nativeDecimals,
+          amount,
         });
-
-        notifyDeposit({
-          userId: wallet.userId,
-          chainId,
-          tokenSymbol,
-          rawAmount,
-          decimals: chain.nativeDecimals,
-          txHash: hash,
-          isTestnet,
-        }).catch(() => {});
-
-        logger.info(
-          { address: wallet.address, chain: chainId, txHash: hash, amount: rawAmount },
-          "Deposit credited via polling",
-        );
       }
-    } catch (err) {
-      logger.error({ err, chain: chainId, address: wallet.address }, "EVM deposit poll failed for wallet");
     }
   }
 
-  lastProcessedBlock.set(key, toBlock);
+  // Scan standard ERC-20 Transfer logs for supported contracts and registered recipients.
+  const tokenInfos = KNOWN_TOKENS.filter((token) => token.chainId === chainId);
+  const tokenInfoByAddress = new Map(tokenInfos.map((token) => [token.contractAddress.toLowerCase(), token]));
+  const tokenAddresses = [...tokenInfoByAddress.keys()];
+  const recipients = [...walletByAddress.keys()];
+  if (tokenAddresses.length > 0) {
+    const aggregated = new Map<string, { wallet: { userId: string; address: string }; token: string; tokenSymbol: string; decimals: number; txHash: string; amount: bigint }>();
+    for (let offset = 0; offset < recipients.length; offset += 100) {
+      const recipientTopics = recipients.slice(offset, offset + 100).map((address) => ethers.zeroPadValue(address, 32));
+      const logs = await provider.getLogs({
+        fromBlock,
+        toBlock,
+        address: tokenAddresses,
+        topics: [TRANSFER_TOPIC, null, recipientTopics],
+      });
+      for (const log of logs) {
+        const recipientTopic = log.topics[2];
+        const toAddress = recipientTopic ? `0x${recipientTopic.slice(-40)}`.toLowerCase() : "";
+        const wallet = walletByAddress.get(toAddress);
+        const token = tokenInfoByAddress.get(log.address.toLowerCase());
+        if (!wallet || !token) continue;
+        const parsed = TRANSFER_EVENT.parseLog({ topics: [...log.topics], data: log.data });
+        if (!parsed) continue;
+        const amount = BigInt(parsed.args.value);
+        const key = `${log.transactionHash.toLowerCase()}:${wallet.userId}:${token.contractAddress.toLowerCase()}`;
+        const entry = aggregated.get(key);
+        if (entry) entry.amount += amount;
+        else aggregated.set(key, { wallet, token: token.contractAddress.toLowerCase(), tokenSymbol: token.symbol, decimals: token.decimals, txHash: log.transactionHash, amount });
+      }
+    }
+    for (const transfer of aggregated.values()) {
+      await creditEvmDeposit({ wallet: transfer.wallet, chainId, isTestnet, txHash: transfer.txHash, token: transfer.token, tokenSymbol: transfer.tokenSymbol, decimals: transfer.decimals, amount: transfer.amount });
+    }
+  }
+
+  await cursorModel.update({
+    where: { chain_isTestnet: { chain: chainId, isTestnet } },
+    data: { lastScannedBlock: toBlock },
+  });
 }
 
 async function pollSolanaChain(isTestnet: boolean): Promise<void> {

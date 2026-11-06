@@ -38,8 +38,8 @@ docker run -d \
 2. Set environment variables:
    - `DISCORD_TOKEN`
    - `DISCORD_CLIENT_ID`
-   - `ALCHEMY_API_KEY`
    - `ENCRYPTION_SECRET` — generate: `openssl rand -hex 32`
+   - EVM and Solana use public RPC endpoints by default, with no provider login or API key. Override a chain with its `*_RPC_URL` variable if needed.
    - To enable Litecoin, set `LITECOIN_API_TOKEN` and optionally `LITECOIN_API_BASE_URL`; see the Litecoin section in [Supported Chains](/chains/).
 3. For persistence: add a Volume mounted at `/app/data` (SQLite), or add the **PostgreSQL** plugin and set `DATABASE_URL`
 4. Deploy — Railway uses `railway.toml` and the included `Dockerfile` automatically
@@ -83,13 +83,7 @@ pm2 save && pm2 startup
 
 ## Deposit Detection
 
-Deposits are detected automatically via polling — no Alchemy webhook setup required. The bot queries `getAssetTransfers` for all registered wallet addresses every 60 seconds and credits any new inbound transactions.
-
-If you want real-time detection (sub-60s), you can optionally configure Alchemy webhooks:
-
-1. Go to [Alchemy Dashboard](https://dashboard.alchemy.com/) → Webhooks
-2. Create an **Address Activity** webhook pointing to `https://your-domain/webhooks/alchemy`
-3. Set `ALCHEMY_WEBHOOK_SIGNING_KEY` in your env
+Deposits are detected automatically by polling confirmation-safe blocks through the configured public RPC endpoints. No provider login, API key, or webhook setup is required. EVM block cursors are stored in the database, and standard ERC-20 transfer logs are scanned alongside direct native-coin transfers. Set `EVM_CONFIRMATIONS` and `EVM_BLOCK_SCAN_BATCH_SIZE` to tune scanning; override any public endpoint with its chain-specific `*_RPC_URL` variable.
 
 ---
 

@@ -7,7 +7,7 @@ description: Set up Crypto in your Discord server
 
 - **Node.js 20+** — [Download](https://nodejs.org/)
 - **Discord Bot Token** — [Discord Developer Portal](https://discord.com/developers/applications)
-- **Alchemy API Key** — [alchemy.com](https://www.alchemy.com/)
+- Public EVM/Solana RPC endpoints are configured by default; no blockchain-provider account or API key is required.
 
 ## Installation
 
@@ -26,7 +26,7 @@ Fill in `.env`:
 |----------|----------|-------------|
 | `DISCORD_TOKEN` | Yes | Bot token from Discord Developer Portal |
 | `DISCORD_CLIENT_ID` | Yes | Application Client ID |
-| `ALCHEMY_API_KEY` | Yes | Alchemy API key |
+| `*_RPC_URL` | No | Public RPC defaults | Optional per-chain override if a default endpoint is rate-limited |
 | `ENCRYPTION_SECRET` | Yes | 32-byte hex for wallet encryption |
 
 Generate `ENCRYPTION_SECRET`:

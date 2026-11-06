@@ -3,7 +3,7 @@ title: API Reference
 description: Crypto REST API endpoints
 ---
 
-Crypto runs a Fastify HTTP server alongside the Discord bot for health checks, the account/legal dashboard, Discord OAuth recovery flows, and Alchemy webhooks.
+Crypto runs a Fastify HTTP server alongside the Discord bot for health checks, the account/legal dashboard, and Discord OAuth recovery flows. Deposit detection uses public JSON-RPC polling.
 
 ## Base URL
 
@@ -60,40 +60,3 @@ Public bot statistics.
 | `transactions.mainnet` | number | Mainnet transaction count |
 | `transactions.testnet` | number | Testnet transaction count |
 | `transactions.total` | number | Combined total |
-
----
-
-## `POST /webhooks/alchemy`
-
-Receives [Alchemy Address Activity webhooks](https://docs.alchemy.com/reference/address-activity-webhook) to detect deposits.
-
-**Headers:**
-
-| Header | Description |
-|--------|-------------|
-| `x-alchemy-signature` | HMAC-SHA256 signature for payload verification |
-
-**Request Body:**
-
-Standard Alchemy webhook payload. See [Alchemy docs](https://docs.alchemy.com/reference/address-activity-webhook) for the full schema.
-
-**Response:**
-
-```json
-{
-  "ok": true,
-  "credited": 1
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `ok` | boolean | Whether processing succeeded |
-| `credited` | number | Number of deposits credited to users |
-
-**Error Responses:**
-
-| Status | Description |
-|--------|-------------|
-| `401` | Invalid or missing webhook signature |
-| `500` | Internal processing error |
